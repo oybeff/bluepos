@@ -17,6 +17,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.uzbekpos.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "Mijoz manzilingizni avtomatik aniqlash uchun GPS ishlatiladi",
         "NSCameraUsageDescription": "Shtrix-kodni skanerlash uchun kamera kerak",
         "NSFaceIDUsageDescription": "Tez kirish uchun Face ID ishlatiladi"
