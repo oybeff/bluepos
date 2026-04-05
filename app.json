@@ -1,0 +1,79 @@
+{
+  "expo": {
+    "name": "Blupos",
+    "slug": "blupos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "blupos",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.uzbekpos.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Mijoz manzilingizni avtomatik aniqlash uchun GPS ishlatiladi",
+        "NSCameraUsageDescription": "Shtrix-kodni skanerlash uchun kamera kerak",
+        "NSFaceIDUsageDescription": "Tez kirish uchun Face ID ishlatiladi"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.uzbekpos.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://blupos.app"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-location",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Shtrix-kodni skanerlash uchun kamera kerak"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Tez kirish uchun Face ID ishlatiladi"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "59e39059-ffcc-4c39-b679-8402283584d0"
+      },
+      "router": {
+        "origin": "https://blupos.app"
+      }
+    },
+    "owner": "oybeff"
+  }
+}
