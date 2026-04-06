@@ -176,7 +176,8 @@ export default function MijozScreen() {
       };
 
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const res = await fetch(`https://${domain}/api/client-deals`, {
+      const base = domain?.startsWith("http") ? domain : `https://${domain}`;
+      const res = await fetch(`${base}/api/client-deals`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ...payload, totalNarx: grandTotal }),
@@ -187,7 +188,7 @@ export default function MijozScreen() {
 
       // Send Telegram
       if (tailorId || installerId) {
-        await fetch(`https://${domain}/api/telegram/send-deal`, {
+        await fetch(`${base}/api/telegram/send-deal`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
@@ -221,7 +222,8 @@ export default function MijozScreen() {
     try {
       const token = await AsyncStorage.getItem("auth_token");
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const r = await fetch(`https://${domain}/api/clients?search=${encodeURIComponent(query)}&limit=6`, {
+      const base = domain?.startsWith("http") ? domain : `https://${domain}`;
+      const r = await fetch(`${base}/api/clients?search=${encodeURIComponent(query)}&limit=6`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await r.json() as { clients?: any[] } | any[];

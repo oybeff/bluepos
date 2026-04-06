@@ -16,7 +16,8 @@ async function apiGet(path: string) {
   const token = await AsyncStorage.getItem("auth_token");
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
   if (!domain) throw new Error("Server sozlanmagan");
-  const res = await fetch(`https://${domain}${path}`, {
+  const base = domain.startsWith("http") ? domain : `https://${domain}`;
+  const res = await fetch(`${base}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error("API xato");

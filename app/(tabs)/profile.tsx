@@ -97,7 +97,8 @@ export default function ProfileScreen() {
       const token = await AsyncStorage.getItem("auth_token");
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
       if (!domain) throw new Error("Server sozlanmagan");
-      const res = await fetch(`https://${domain}/api/auth/change-password`, {
+      const base = domain.startsWith("http") ? domain : `https://${domain}`;
+      const res = await fetch(`${base}/api/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),

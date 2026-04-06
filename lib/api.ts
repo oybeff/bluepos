@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export function getApiUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
   if (!domain) {
-    console.warn("EXPO_PUBLIC_DOMAIN is not set — API calls will fail");
+    if (__DEV__) console.warn("EXPO_PUBLIC_DOMAIN is not set — API calls will fail");
     return "";
   }
   // Support full URLs (http://...) or plain domains (defaults to https)

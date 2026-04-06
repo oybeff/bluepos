@@ -18,7 +18,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/context/auth";
 
 if (process.env.EXPO_PUBLIC_DOMAIN) {
-  setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+  const d = process.env.EXPO_PUBLIC_DOMAIN;
+  setBaseUrl(d.startsWith("http") ? d : `https://${d}`);
 }
 
 SplashScreen.preventAutoHideAsync();
