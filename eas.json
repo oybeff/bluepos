@@ -17,6 +17,14 @@
         "simulator": false
       }
     },
+    "apk": {
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "http://164.92.244.229:3001"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "env": {
