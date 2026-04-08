@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView,
-  RefreshControl, Platform, ActivityIndicator, TouchableOpacity,
+  RefreshControl, Platform, ActivityIndicator, TouchableOpacity, Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { useAuth } from "@/context/auth";
 
 const C = Colors.light;
 
@@ -45,9 +46,28 @@ const STATUS_CFG: Record<string, { l: string; c: string; bg: string }> = {
 export default function StatistikaScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { logout, user } = useAuth();
   const topPadding = insets.top + (Platform.OS === "web" ? 67 : 16);
   const bottomPadding = insets.bottom + (Platform.OS === "web" ? 90 : 90);
   const [refreshing, setRefreshing] = React.useState(false);
+
+  const handleLogout = () => {
+    if (Platform.OS === "web") {
+      logout();
+      return;
+    }
+    Alert.alert("Chiqish", "Tizimdan chiqmoqchimisiz?", [
+      { text: "Bekor", style: "cancel" },
+      { text: "Chiqish", style: "destructive", onPress: () => logout() },
+    ]);
+  };
+
+  const { data: notifCount } = useQuery<{ total: number; high: number }>({
+    queryKey: ["notif-count"],
+    queryFn: () => apiReq("/notifications/count"),
+    refetchInterval: 120_000,
+    retry: false,
+  });
 
   const { data: monthTxns = [], isLoading } = useQuery<FinanceTxn[]>({
     queryKey: ["finance-month"],
@@ -92,12 +112,42 @@ export default function StatistikaScreen() {
       >
         {/* ─── Hero ─────────────────────────────────────────────── */}
         <View style={[st.hero, { paddingTop: topPadding }]}>
-          <View>
-            <Text style={st.heroTitle}>Blupos</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={st.heroGreeting}>
+              {new Date().getHours() < 12 ? "Xayrli tong" : new Date().getHours() < 18 ? "Xayrli kun" : "Xayrli kech"} 👋
+            </Text>
+            <Text style={st.heroTitle}>{user?.fullName || "Blupos"}</Text>
             <Text style={st.heroDate}>{todayStr()}</Text>
           </View>
-          <View style={st.heroBadge}>
-            <Feather name="activity" size={20} color="#fff" />
+          <View style={{ gap: 8, alignItems: "center" }}>
+            <TouchableOpacity
+              style={[st.heroBadge, { backgroundColor: "rgba(255,255,255,0.18)" }]}
+              onPress={() => router.push("/(tabs)/profile")}
+              activeOpacity={0.7}
+            >
+              <View style={st.heroAvatar}>
+                <Text style={st.heroAvatarTxt}>{(user?.fullName || "U").charAt(0).toUpperCase()}</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[st.heroBadge, { backgroundColor: "rgba(255,255,255,0.15)" }]}
+              onPress={() => router.push("/(tabs)/xabarnomalar" as any)}
+              activeOpacity={0.7}
+            >
+              <Feather name="bell" size={18} color="rgba(255,255,255,0.85)" />
+              {(notifCount?.high ?? 0) > 0 && (
+                <View style={st.bellBadge}>
+                  <Text style={st.bellBadgeTxt}>{notifCount!.high > 9 ? "9+" : notifCount!.high}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[st.heroBadge, { backgroundColor: "rgba(255,255,255,0.15)" }]}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
+              <Feather name="log-out" size={18} color="rgba(255,255,255,0.85)" />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -147,31 +197,46 @@ export default function StatistikaScreen() {
               <Text style={[st.quickLabel, { color: "#7C3AED" }]}>Ombor</Text>
             </TouchableOpacity>
           </View>
-          {/* Row 2 */}
+          {/* Row 2 - Products */}
           <View style={[st.quickRow, { marginTop: 8 }]}>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FDF4FF" }]} onPress={() => router.push("/hisobot" as any)}>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF0F0" }]} onPress={() => router.push("/(tabs)/sotuv" as any)}>
+              <View style={[st.quickIcon, { backgroundColor: "#EF4444" }]}>
+                <Feather name="shopping-cart" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#EF4444" }]}>Sotuv</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0F9FF" }]} onPress={() => router.push("/(tabs)/mahsulotlar" as any)}>
+              <View style={[st.quickIcon, { backgroundColor: "#0EA5E9" }]}>
+                <Feather name="box" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#0EA5E9" }]}>Mahsulotlar</Text>
+            </TouchableOpacity>
+          </View>
+          {/* Row 3 */}
+          <View style={[st.quickRow, { marginTop: 8 }]}>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FDF4FF" }]} onPress={() => router.push("/(tabs)/hisobot" as any)}>
               <View style={[st.quickIcon, { backgroundColor: "#A855F7" }]}>
                 <Feather name="bar-chart-2" size={18} color="#fff" />
               </View>
               <Text style={[st.quickLabel, { color: "#A855F7" }]}>Hisobot</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/katalog" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
-                <Feather name="grid" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Katalog</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/low-stock" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#EA580C" }]}>
-                <Feather name="alert-triangle" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#EA580C" }]}>Kam qoldiq</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/supplier-order" as any)}>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/(tabs)/kanban" as any)}>
               <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
-                <Feather name="truck" size={18} color="#fff" />
+                <Feather name="trello" size={18} color="#fff" />
               </View>
-              <Text style={[st.quickLabel, { color: "#059669" }]}>Kirim</Text>
+              <Text style={[st.quickLabel, { color: "#059669" }]}>Kanban</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/jadval" as any)}>
+              <View style={[st.quickIcon, { backgroundColor: "#EA580C" }]}>
+                <Feather name="calendar" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#EA580C" }]}>Jadval</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/qarz-daftar" as any)}>
+              <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
+                <Feather name="book" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Qarz daftar</Text>
             </TouchableOpacity>
           </View>
           {/* Row 3 */}
@@ -188,8 +253,18 @@ export default function StatistikaScreen() {
               </View>
               <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Hisob</Text>
             </TouchableOpacity>
-            <View style={[st.quickCard, { backgroundColor: "transparent" }]} />
-            <View style={[st.quickCard, { backgroundColor: "transparent" }]} />
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EFF6FF" }]} onPress={() => router.push("/(tabs)/mijozlar")}>
+              <View style={[st.quickIcon, { backgroundColor: "#3B82F6" }]}>
+                <Feather name="users" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#3B82F6" }]}>Mijozlar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F5F3FF" }]} onPress={() => router.push("/(tabs)/xodimlar" as any)}>
+              <View style={[st.quickIcon, { backgroundColor: "#8B5CF6" }]}>
+                <Feather name="user-check" size={18} color="#fff" />
+              </View>
+              <Text style={[st.quickLabel, { color: "#8B5CF6" }]}>Xodimlar</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -287,10 +362,15 @@ function SC({ icon, ic, bg, lbl, val }: { icon: any; ic: string; bg: string; lbl
 
 const st = StyleSheet.create({
   root:    { flex: 1 },
-  hero:    { backgroundColor: "#4F46E5", paddingHorizontal: 20, paddingBottom: 32, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-  heroTitle:{ fontSize: 26, fontFamily: "Inter_700Bold", color: "#fff" },
-  heroDate: { fontSize: 12, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.72)", marginTop: 3 },
-  heroBadge:{ width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  hero:    { backgroundColor: "#4F46E5", paddingHorizontal: 20, paddingBottom: 36, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  heroGreeting: { fontSize: 13, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.80)", marginBottom: 4 },
+  heroTitle:{ fontSize: 22, fontFamily: "Inter_700Bold", color: "#fff" },
+  heroDate: { fontSize: 12, fontFamily: "Inter_400Regular", color: "rgba(255,255,255,0.65)", marginTop: 4 },
+  heroBadge:{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  heroAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center" },
+  heroAvatarTxt: { fontSize: 18, fontFamily: "Inter_700Bold", color: "#4F46E5" },
+  bellBadge: { position: "absolute", top: 2, right: 2, backgroundColor: "#EF4444", borderRadius: 8, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 3, borderWidth: 1, borderColor: "#fff" },
+  bellBadgeTxt: { fontSize: 9, fontFamily: "Inter_700Bold", color: "#fff" },
 
   todayCard:{ marginHorizontal: 16, marginTop: -20, borderRadius: 20, padding: 18, shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 20, elevation: 8 },
   todayRow: { flexDirection: "row", alignItems: "center", marginTop: 12 },

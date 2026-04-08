@@ -31,6 +31,7 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
       },
+      "usesCleartextTraffic": true,
       "package": "com.uzbekpos.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",

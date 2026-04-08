@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Linking, Alert, Platform, RefreshControl,
+  Modal, TextInput,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,6 +10,8 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 
 const C = Colors.light;
 
@@ -66,6 +69,11 @@ export default function DealDetailScreen() {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [paySum, setPaySum] = useState("");
+  const [payTur, setPayTur] = useState<"naqd"|"plastik">("naqd");
+  const [payLoading, setPayLoading] = useState(false);
+  const [sharingChek, setSharingChek] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 16);
 
   const { data: deal, isLoading, refetch } = useQuery<Deal>({
@@ -118,6 +126,145 @@ export default function DealDetailScreen() {
   const grandTotal = (deal?.totalNarx || 0) + (deal?.ornatishNarx || 0) + (deal?.chevarJami || 0);
   const tolov = deal ? grandTotal - (deal.qarzSumma || 0) : 0;
 
+  async function handlePayment() {
+    const sum = parseFloat(paySum.replace(/\s/g, ""));
+    if (!sum || sum <= 0) { Alert.alert("Summa kiriting"); return; }
+    if (!deal) return;
+    setPayLoading(true);
+    try {
+      const result = await apiReq<any>("/payments", {
+        method: "POST",
+        body: JSON.stringify({ dealId: Number(id), summa: sum, tolovTuri: payTur }),
+      });
+      Alert.alert("✅ To'lov qabul qilindi!", `Qolgan qarz: ${fmt(result.newQarzSumma)}`);
+      setShowPayModal(false); setPaySum("");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["deal", id] }),
+        qc.invalidateQueries({ queryKey: ["deals-recent"] }),
+      ]);
+      refetch();
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setPayLoading(false); }
+  }
+
+  async function handleTaklifnoma() {
+    if (!deal) return;
+    setSharingChek(true);
+    try {
+      const meas = deal.measurements ? Object.entries(deal.measurements) : [];
+      const measRows = meas.map(([k, v]) => `<tr><td>${k}</td><td style="font-weight:600">${v}</td></tr>`).join("");
+
+      const html = `<!DOCTYPE html>
+<html lang="uz"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,sans-serif;padding:32px;color:#1e293b;}
+.header{background:#4F46E5;color:#fff;padding:24px 28px;border-radius:12px;margin-bottom:28px;}
+.company{font-size:22px;font-weight:900;letter-spacing:1px;}
+.tagline{font-size:12px;opacity:0.8;margin-top:4px;}
+.badge{background:rgba(255,255,255,0.15);display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;margin-top:8px;}
+h3{font-size:14px;color:#64748b;text-transform:uppercase;letter-spacing:0.6px;margin:20px 0 10px;}
+.card{border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px;}
+.row:last-child{border-bottom:none;}
+.label{color:#64748b;}
+.val{font-weight:600;color:#1e293b;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{background:#f8fafc;padding:8px 12px;text-align:left;color:#64748b;font-size:11px;text-transform:uppercase;}
+td{padding:8px 12px;border-bottom:1px solid #f1f5f9;}
+.total-card{background:#EEF2FF;border:1px solid #C7D2FE;border-radius:10px;padding:16px 20px;}
+.total-row{display:flex;justify-content:space-between;padding:5px 0;}
+.grand{font-size:20px;font-weight:900;color:#4F46E5;margin-top:8px;}
+.footer{text-align:center;font-size:11px;color:#94a3b8;margin-top:24px;padding-top:12px;border-top:1px solid #f1f5f9;}
+</style></head><body>
+<div class="header">
+  <div class="company">BluePOS</div>
+  <div class="tagline">Parda do'konlari uchun professional xizmat</div>
+  <div class="badge">📋 TAKLIFNOMA · #${deal.id}</div>
+</div>
+
+<h3>Mijoz ma'lumotlari</h3>
+<div class="card">
+  <div class="row"><span class="label">Ism</span><span class="val">${deal.mijozIsm || "—"}</span></div>
+  <div class="row"><span class="label">Telefon</span><span class="val">${deal.mijozPhone || "—"}</span></div>
+  <div class="row"><span class="label">Manzil</span><span class="val">${deal.manzil || "—"}</span></div>
+  <div class="row"><span class="label">Taklif sanasi</span><span class="val">${new Date().toLocaleDateString("uz-UZ")}</span></div>
+  ${deal.tayyorBolishKuni ? `<div class="row"><span class="label">Tayyor bo'lish kuni</span><span class="val">${fmtDate(deal.tayyorBolishKuni)}</span></div>` : ""}
+</div>
+
+${meas.length > 0 ? `<h3>O'lchamlar</h3>
+<div class="card">
+<table><thead><tr><th>Xona/joy</th><th>O'lchov</th></tr></thead><tbody>${measRows}</tbody></table>
+</div>` : ""}
+
+<h3>Narxlar</h3>
+<div class="card">
+  <div class="row"><span class="label">Jami material</span><span class="val">${deal.totalMaterial?.toFixed(2)} m²</span></div>
+  <div class="row"><span class="label">Narx (1 metr)</span><span class="val">${fmt(deal.narxPerMetr)}</span></div>
+  <div class="row"><span class="label">Parda summasi</span><span class="val">${fmt(deal.totalNarx)}</span></div>
+  ${(deal.ornatishNarx || 0) > 0 ? `<div class="row"><span class="label">O'rnatish xizmati</span><span class="val">${fmt(deal.ornatishNarx)}</span></div>` : ""}
+  ${(deal.chevarJami || 0) > 0 ? `<div class="row"><span class="label">Tikuvchi haqi</span><span class="val">${fmt(deal.chevarJami)}</span></div>` : ""}
+</div>
+
+<div class="total-card">
+  <div class="total-row"><span style="color:#6366f1;font-weight:600">Zaklat (oldindan to'lov)</span><span style="font-weight:700">${fmt(deal.zaklatSumma)}</span></div>
+  <div class="total-row"><span style="color:#64748b">Qolgan qism</span><span style="font-weight:700;color:#EF4444">${fmt(deal.qarzSumma)}</span></div>
+  <div class="total-row grand"><span>JAMI SUMMA</span><span>${fmt(grandTotal)}</span></div>
+</div>
+
+<div class="footer">Ushbu taklifnoma BluePOS tizimi orqali yaratildi · ${new Date().toLocaleDateString("uz-UZ")}</div>
+</body></html>`;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Taklifnomani ulashish" });
+      else Alert.alert("PDF yaratildi", `Fayl: ${uri}`);
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setSharingChek(false); }
+  }
+
+  async function handleChek() {
+    if (!deal) return;
+    setSharingChek(true);
+    try {
+      const html = `<!DOCTYPE html>
+<html lang="uz"><head><meta charset="utf-8"><style>
+body{font-family:Arial,sans-serif;padding:20px;max-width:400px;margin:0 auto;}
+h2{text-align:center;color:#4F46E5;margin-bottom:4px;}
+.sub{text-align:center;color:#6b7280;font-size:12px;margin-bottom:20px;}
+hr{border:1px dashed #d1d5db;margin:12px 0;}
+.row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;}
+.label{color:#6b7280;}.value{font-weight:600;}
+.total{font-size:16px;font-weight:800;}.green{color:#10B981;}.red{color:#EF4444;}
+.footer{text-align:center;font-size:11px;color:#9ca3af;margin-top:20px;}
+</style></head><body>
+<h2>BluePOS</h2>
+<div class="sub">Parda do'konlari uchun POS tizimi</div>
+<div class="row"><span class="label">Chek #</span><span class="value">${deal.id}</span></div>
+<div class="row"><span class="label">Sana</span><span class="value">${new Date().toLocaleDateString("uz-UZ")}</span></div>
+<hr/>
+<div class="row"><span class="label">Mijoz</span><span class="value">${deal.mijozIsm || "—"}</span></div>
+<div class="row"><span class="label">Telefon</span><span class="value">${deal.mijozPhone || "—"}</span></div>
+<div class="row"><span class="label">Manzil</span><span class="value">${deal.manzil || "—"}</span></div>
+<hr/>
+<div class="row"><span class="label">Material (${deal.totalMaterial?.toFixed(2)} metr)</span><span class="value">${fmt(deal.totalNarx)}</span></div>
+${(deal.ornatishNarx || 0) > 0 ? `<div class="row"><span class="label">O'rnatish</span><span class="value">${fmt(deal.ornatishNarx)}</span></div>` : ""}
+${(deal.chevarJami || 0) > 0 ? `<div class="row"><span class="label">Tikuvchi haqi</span><span class="value">${fmt(deal.chevarJami)}</span></div>` : ""}
+<hr/>
+<div class="row total"><span class="label">JAMI</span><span class="value">${fmt(grandTotal)}</span></div>
+<div class="row"><span class="label">To'langan (zaklat)</span><span class="value green">${fmt(deal.zaklatSumma)}</span></div>
+<div class="row"><span class="label">Qolgan qarz</span><span class="value ${deal.qarzSumma > 0 ? 'red' : 'green'}">${fmt(deal.qarzSumma)}</span></div>
+${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati</span><span class="value">${fmtDate(deal.qarzKaytarishKuni)}</span></div>` : ""}
+<hr/>
+<div class="footer">Ushbu chek BluePOS tomonidan yaratildi</div>
+</body></html>`;
+      const { uri } = await Print.printToFileAsync({ html });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Chek ulashish" });
+      else Alert.alert("PDF yaratildi", `Fayl: ${uri}`);
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setSharingChek(false); }
+  }
+
   const NEXT_STATUSES: Record<string, string[]> = {
     yangi: ["tikuvda"],
     tikuvda: ["tayyor", "yangi"],
@@ -162,10 +309,14 @@ export default function DealDetailScreen() {
           </Text>
           <Text style={[st.headerSub, { color: C.textSecondary }]}>#{deal.id} · {fmtDateTime(deal.createdAt)}</Text>
         </View>
-        <View style={[st.statusBadge, { backgroundColor: statusInfo.color + "20" }]}>
-          <Feather name={statusInfo.icon} size={13} color={statusInfo.color} />
-          <Text style={[st.statusTxt, { color: statusInfo.color }]}>{statusInfo.label}</Text>
-        </View>
+        <TouchableOpacity
+          style={[st.chekBtn, { opacity: sharingChek ? 0.6 : 1 }]}
+          onPress={handleChek}
+          disabled={sharingChek}
+          activeOpacity={0.8}
+        >
+          {sharingChek ? <ActivityIndicator size="small" color={C.primary} /> : <Feather name="printer" size={16} color={C.primary} />}
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -258,6 +409,16 @@ export default function DealDetailScreen() {
               <Feather name="calendar" size={12} color="rgba(255,255,255,0.7)" />
               <Text style={st.debtDueTxt}>Qaytarish kuni: {fmtDate(deal.qarzKaytarishKuni)}</Text>
             </View>
+          )}
+          {(deal.qarzSumma || 0) > 0 && (
+            <TouchableOpacity
+              style={st.payAcceptBtn}
+              onPress={() => setShowPayModal(true)}
+              activeOpacity={0.85}
+            >
+              <Feather name="check-circle" size={16} color="#fff" />
+              <Text style={st.payAcceptTxt}>To'lov qabul qilish</Text>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -387,7 +548,75 @@ export default function DealDetailScreen() {
           </Section>
         )}
 
+        {/* ── Taklifnoma ── */}
+        <TouchableOpacity
+          style={[st.taklifBtn, { backgroundColor: "#EEF2FF", borderColor: C.primary }]}
+          onPress={handleTaklifnoma}
+          disabled={sharingChek}
+          activeOpacity={0.85}
+        >
+          <Feather name="file-text" size={18} color={C.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[{ fontSize: 14, fontFamily: "Inter_700Bold", color: C.primary }]}>Taklifnoma yaratish</Text>
+            <Text style={[{ fontSize: 12, fontFamily: "Inter_400Regular", color: C.textSecondary }]}>Professional PDF taklif ulashish</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={C.primary} />
+        </TouchableOpacity>
+
       </ScrollView>
+
+      {/* ── To'lov modali ── */}
+      <Modal visible={showPayModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowPayModal(false)}>
+        <View style={[st.modalWrap, { backgroundColor: C.background }]}>
+          <View style={[st.modalHeader, { borderBottomColor: C.border }]}>
+            <Text style={[st.modalTitle, { color: C.text }]}>To'lov qabul qilish</Text>
+            <TouchableOpacity onPress={() => setShowPayModal(false)}>
+              <Feather name="x" size={24} color={C.text} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+            <View style={[st.modalInfoCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={{ fontSize: 13, color: C.textSecondary, fontFamily: "Inter_400Regular" }}>Qolgan qarz</Text>
+              <Text style={{ fontSize: 22, color: "#EF4444", fontFamily: "Inter_700Bold" }}>{fmt(deal?.qarzSumma ?? 0)}</Text>
+            </View>
+            <Text style={[st.inputLabel, { color: C.textSecondary }]}>To'lov summasi</Text>
+            <TextInput
+              style={[st.modalInput, { borderColor: C.border, backgroundColor: C.surface, color: C.text }]}
+              value={paySum}
+              onChangeText={setPaySum}
+              placeholder="0"
+              placeholderTextColor={C.textSecondary}
+              keyboardType="numeric"
+            />
+            <Text style={[st.inputLabel, { color: C.textSecondary }]}>To'lov turi</Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              {(["naqd", "plastik"] as const).map(t => (
+                <TouchableOpacity
+                  key={t}
+                  style={[st.payTurBtn, { borderColor: payTur === t ? C.primary : C.border, backgroundColor: payTur === t ? C.primary + "15" : C.surface }]}
+                  onPress={() => setPayTur(t)}
+                >
+                  <Feather name={t === "naqd" ? "dollar-sign" : "credit-card"} size={16} color={payTur === t ? C.primary : C.textSecondary} />
+                  <Text style={{ fontFamily: "Inter_600SemiBold", color: payTur === t ? C.primary : C.textSecondary, fontSize: 14 }}>
+                    {t === "naqd" ? "Naqd" : "Plastik"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[st.paySubmitBtn, { backgroundColor: C.primary, opacity: payLoading ? 0.7 : 1 }]}
+              onPress={handlePayment}
+              disabled={payLoading}
+              activeOpacity={0.85}
+            >
+              {payLoading
+                ? <ActivityIndicator color="#fff" />
+                : <><Feather name="check" size={18} color="#fff" /><Text style={st.paySubmitTxt}>To'lovni tasdiqlash</Text></>
+              }
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -497,4 +726,46 @@ const st = StyleSheet.create({
   },
   timelineLine: { position: "absolute", left: 10, top: 26, width: 2, height: 16 },
   timelineLabel: { fontSize: 13 },
+
+  chekBtn: {
+    width: 38, height: 38, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE",
+  },
+  payAcceptBtn: {
+    marginTop: 14, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, paddingVertical: 12, borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  payAcceptTxt: { fontSize: 15, fontFamily: "Inter_700Bold", color: "#fff" },
+
+  modalWrap: { flex: 1 },
+  modalHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1,
+  },
+  modalTitle: { fontSize: 18, fontFamily: "Inter_700Bold" },
+  modalInfoCard: {
+    borderRadius: 14, borderWidth: 1, padding: 16,
+    alignItems: "center", gap: 4,
+  },
+  inputLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  modalInput: {
+    borderWidth: 1, borderRadius: 12, padding: 14,
+    fontSize: 18, fontFamily: "Inter_700Bold",
+  },
+  payTurBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5,
+  },
+  paySubmitBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 10, paddingVertical: 15, borderRadius: 14, marginTop: 8,
+  },
+  paySubmitTxt: { fontSize: 16, fontFamily: "Inter_700Bold", color: "#fff" },
+
+  taklifBtn: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 16, borderRadius: 16, borderWidth: 1.5,
+  },
 });

@@ -43,6 +43,7 @@ export default function OldiBerdiScreen() {
 
   const [scanTarget, setScanTarget] = useState<number | null>(null);
   const [scanCooldown, setScanCooldown] = useState(false);
+  const [torch, setTorch] = useState(false);
 
   const openScanner = async (itemIndex: number) => {
     if (!permission?.granted) {
@@ -51,6 +52,7 @@ export default function OldiBerdiScreen() {
     }
     setScanTarget(itemIndex);
     setScanCooldown(false);
+    setTorch(false);
   };
 
   const handleBarcode = ({ data }: { data: string }) => {
@@ -359,6 +361,9 @@ export default function OldiBerdiScreen() {
             <CameraView
               style={{ flex: 1 }}
               facing="back"
+              autofocus="on"
+              zoom={0}
+              enableTorch={torch}
               barcodeScannerSettings={{ barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "upc_a", "upc_e", "pdf417"] }}
               onBarcodeScanned={handleBarcode}
             />
@@ -366,14 +371,29 @@ export default function OldiBerdiScreen() {
 
           {/* Scan frame overlay */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-            <View style={{ width: 260, height: 160, borderRadius: 16, borderWidth: 3, borderColor: C.primary, backgroundColor: "transparent" }}>
-              <View style={{ position: "absolute", top: -3, left: -3, width: 32, height: 32, borderTopWidth: 4, borderLeftWidth: 4, borderColor: "#fff", borderRadius: 4 }} />
-              <View style={{ position: "absolute", top: -3, right: -3, width: 32, height: 32, borderTopWidth: 4, borderRightWidth: 4, borderColor: "#fff", borderRadius: 4 }} />
-              <View style={{ position: "absolute", bottom: -3, left: -3, width: 32, height: 32, borderBottomWidth: 4, borderLeftWidth: 4, borderColor: "#fff", borderRadius: 4 }} />
-              <View style={{ position: "absolute", bottom: -3, right: -3, width: 32, height: 32, borderBottomWidth: 4, borderRightWidth: 4, borderColor: "#fff", borderRadius: 4 }} />
+            <View style={{ width: 280, height: 170, position: "relative" }}>
+              <View style={{ position: "absolute", top: 0, left: 0, width: 32, height: 32, borderTopWidth: 4, borderLeftWidth: 4, borderColor: "#fff", borderTopLeftRadius: 6 }} />
+              <View style={{ position: "absolute", top: 0, right: 0, width: 32, height: 32, borderTopWidth: 4, borderRightWidth: 4, borderColor: "#fff", borderTopRightRadius: 6 }} />
+              <View style={{ position: "absolute", bottom: 0, left: 0, width: 32, height: 32, borderBottomWidth: 4, borderLeftWidth: 4, borderColor: "#fff", borderBottomLeftRadius: 6 }} />
+              <View style={{ position: "absolute", bottom: 0, right: 0, width: 32, height: 32, borderBottomWidth: 4, borderRightWidth: 4, borderColor: "#fff", borderBottomRightRadius: 6 }} />
+              <View style={{ position: "absolute", top: "50%", left: 8, right: 8, height: 2, backgroundColor: "#4ADE80", opacity: 0.9 }} />
             </View>
-            <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 16, textAlign: "center" }}>Barkod yoki QR kod</Text>
+            <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 16, textAlign: "center" }}>📷 Barkodni ramka ichiga yo'naltiring</Text>
           </View>
+
+          {/* Torch button */}
+          <TouchableOpacity
+            onPress={() => setTorch(t => !t)}
+            style={{
+              position: "absolute", bottom: 40, right: 24,
+              width: 52, height: 52, borderRadius: 26,
+              backgroundColor: torch ? "rgba(252,211,77,0.3)" : "rgba(0,0,0,0.5)",
+              borderWidth: 2, borderColor: torch ? "#FCD34D" : "rgba(255,255,255,0.3)",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <Feather name={torch ? "zap" : "zap-off"} size={22} color={torch ? "#FCD34D" : "#fff"} />
+          </TouchableOpacity>
         </View>
       </Modal>
     </KeyboardAvoidingView>

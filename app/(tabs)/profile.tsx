@@ -12,12 +12,16 @@ import Colors from "@/constants/colors";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
+  cashier: "Kassir",
   branch_owner: "Filial egasi",
   seller: "Sotuvchi",
   measurer: "O'lchov ustasi",
   installer: "O'rnatuvchi",
   accountant: "Buxgalter",
-  tailor: "Chevar (Tikuvchi)",
+  tailor: "Tikuvchi",
+  chevar: "Chevar (Tikuvchi)",
+  haydovchi: "Haydovchi / O'rnatuvchi",
+  manager: "Menejer",
 };
 
 const NOTIF_KEY = "notif_prefs";
@@ -66,16 +70,14 @@ export default function ProfileScreen() {
     await AsyncStorage.setItem(NOTIF_KEY, JSON.stringify({ deadlines, debt, stock }));
   }
 
-  async function handleLogout() {
+  function handleLogout() {
+    if (Platform.OS === "web") {
+      logout();
+      return;
+    }
     Alert.alert("Chiqish", "Tizimdan chiqmoqchimisiz?", [
       { text: "Bekor qilish", style: "cancel" },
-      {
-        text: "Chiqish", style: "destructive",
-        onPress: async () => {
-          await logout();
-          router.replace("/login");
-        },
-      },
+      { text: "Chiqish", style: "destructive", onPress: () => logout() },
     ]);
   }
 
@@ -118,6 +120,63 @@ export default function ProfileScreen() {
   }
 
   const menuItems = [
+    ...(user?.role === "super_admin" ? [{
+      icon: "settings" as const,
+      label: "Super Admin Panel",
+      subtitle: "Do'konlar, serverlar va SMS boshqaruvi",
+      onPress: () => router.push("/super-admin" as any),
+      rightEl: <Feather name="chevron-right" size={18} color="#fff" />,
+      _superAdmin: true,
+    }] : []),
+    {
+      icon: "users" as const,
+      label: "Mijozlar bazasi",
+      subtitle: "Mijozlarni boshqarish va SMS yuborish",
+      onPress: () => router.push("/(tabs)/mijozlar" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "user-check" as const,
+      label: "Xodimlar",
+      subtitle: "Tikuvchi, o'rnatuvchi va menejerlar",
+      onPress: () => router.push("/(tabs)/xodimlar" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "trello" as const,
+      label: "Kanban (buyurtmalar)",
+      subtitle: "Buyurtmalar holati va jarayon",
+      onPress: () => router.push("/(tabs)/kanban" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "calendar" as const,
+      label: "Ish jadvali",
+      subtitle: "O'rnatuvchilar ish tartibi",
+      onPress: () => router.push("/(tabs)/jadval" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "bar-chart-2" as const,
+      label: "Hisobot",
+      subtitle: "Sotuv va mijoz hisobotlari",
+      onPress: () => router.push("/(tabs)/hisobot" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "unlock" as const,
+      label: "Kassa",
+      subtitle: "Kassa smenasi va tranzaksiyalar",
+      onPress: () => router.push("/(tabs)/kassa" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "package" as const,
+      label: "Ombor",
+      subtitle: "Mahsulotlar va harakatlar",
+      onPress: () => router.push("/(tabs)/ombor-harakati" as any),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
     {
       icon: "bell" as const,
       label: "Bildirishnomalar",
@@ -130,6 +189,13 @@ export default function ProfileScreen() {
       label: "Parolni o'zgartirish",
       subtitle: "Xavfsizlik uchun vaqti-vaqti bilan o'zgartiring",
       onPress: () => setShowPwModal(true),
+      rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
+    },
+    {
+      icon: "printer" as const,
+      label: "Printer sozlamalari",
+      subtitle: "Termal chek va barcode label printer",
+      onPress: () => router.push("/printer-settings" as any),
       rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
     },
     {
@@ -187,12 +253,30 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Super Admin Panel — alohida tugma */}
+      {user?.role === "super_admin" && (
+        <TouchableOpacity
+          style={[styles.superAdminBtn, { backgroundColor: C.primary }]}
+          onPress={() => router.push("/super-admin" as any)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.superAdminIconWrap}>
+            <Feather name="settings" size={20} color={C.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.superAdminLabel}>Super Admin Panel</Text>
+            <Text style={styles.superAdminSub}>Do'konlar · Serverlar · SMS boshqaruvi</Text>
+          </View>
+          <Feather name="chevron-right" size={20} color="#fff" />
+        </TouchableOpacity>
+      )}
+
       {/* Menu card */}
       <View style={[styles.menuCard, { backgroundColor: C.card, borderColor: C.border }]}>
-        {menuItems.map((item, i) => (
+        {menuItems.filter((item: any) => !item._superAdmin).map((item, i, arr) => (
           <TouchableOpacity
             key={item.label}
-            style={[styles.menuItem, { borderBottomColor: C.border, borderBottomWidth: i < menuItems.length - 1 ? 1 : 0 }]}
+            style={[styles.menuItem, { borderBottomColor: C.border, borderBottomWidth: i < arr.length - 1 ? 1 : 0 }]}
             onPress={item.onPress}
             activeOpacity={0.7}
           >
@@ -392,4 +476,15 @@ const styles = StyleSheet.create({
   pwInput: { flex: 1, height: 48, paddingHorizontal: 14, fontSize: 15, fontFamily: "Inter_400Regular" },
   saveBtn: { height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", marginTop: 8 },
   saveBtnText: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  superAdminBtn: {
+    marginHorizontal: 20, borderRadius: 16, padding: 16, marginBottom: 12,
+    flexDirection: "row", alignItems: "center", gap: 14,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4,
+  },
+  superAdminIconWrap: {
+    width: 44, height: 44, borderRadius: 13, backgroundColor: "#fff",
+    alignItems: "center", justifyContent: "center",
+  },
+  superAdminLabel: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
+  superAdminSub: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
 });

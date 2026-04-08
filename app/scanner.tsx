@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, ScrollView, Vibration, Platform,
+  ActivityIndicator, ScrollView, Vibration, Platform, Dimensions,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,7 +20,11 @@ async function apiGet(path: string) {
   const res = await fetch(`${base}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (!res.ok) throw new Error("API xato");
+  if (!res.ok) {
+    const err: any = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -49,6 +53,7 @@ export default function Scanner() {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [torch, setTorch] = useState(false);
   const insets = useSafeAreaInsets();
   const lastScanned = useRef<string | null>(null);
 
@@ -61,15 +66,14 @@ export default function Scanner() {
     setProduct(null);
     if (Platform.OS !== "web") Vibration.vibrate(100);
     try {
-      const res = await apiGet(`/api/products?barcode=${encodeURIComponent(data)}`);
-      const list: Product[] = res.products || res || [];
-      if (list.length > 0) {
-        setProduct(list[0]);
-      } else {
+      const p = await apiGet(`/api/products/by-barcode/${encodeURIComponent(data)}`);
+      setProduct(p as Product);
+    } catch (err: any) {
+      if (err?.status === 404 || err?.message?.includes("404")) {
         setError(`Barcode topilmadi:\n${data}`);
+      } else {
+        setError("Server bilan bog'lanishda xato.");
       }
-    } catch {
-      setError("Server bilan bog'lanishda xato.");
     } finally {
       setLoading(false);
     }
@@ -79,6 +83,7 @@ export default function Scanner() {
     setScanned(false);
     setProduct(null);
     setError(null);
+    setTorch(false);
     lastScanned.current = null;
   };
 
@@ -138,11 +143,24 @@ export default function Scanner() {
           <CameraView
             style={StyleSheet.absoluteFillObject}
             facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "code128", "qr", "code39", "upc_a", "upc_e"] }}
+            autofocus="on"
+            zoom={0}
+            enableTorch={torch}
+            barcodeScannerSettings={{ barcodeTypes: ["ean13", "ean8", "code128", "qr", "code39", "upc_a", "upc_e", "pdf417"] }}
             onBarcodeScanned={handleBarcode}
           />
         ) : (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#111" }]} />
+        )}
+
+        {/* Torch button */}
+        {!scanned && (
+          <TouchableOpacity
+            style={s.torchBtn}
+            onPress={() => setTorch(t => !t)}
+          >
+            <Feather name={torch ? "zap" : "zap-off"} size={20} color={torch ? "#FCD34D" : "#fff"} />
+          </TouchableOpacity>
         )}
 
         {/* Scan frame */}
@@ -154,7 +172,7 @@ export default function Scanner() {
             <View style={[s.corner, s.cBR]} />
             {!scanned && <View style={s.scanLine} />}
           </View>
-          <Text style={s.hint}>Barcodni ramka ichiga yo'naltiring</Text>
+          <Text style={s.hint}>📷 Barcodni ramka ichiga yo'naltiring</Text>
         </View>
 
         {loading && (
@@ -268,6 +286,20 @@ export default function Scanner() {
               <Feather name="x-circle" size={32} color="#DC2626" />
             </View>
             <Text style={[s.stateTxt, { color: "#DC2626" }]}>{error}</Text>
+            {error.includes("topilmadi") && lastScanned.current && (
+              <TouchableOpacity
+                style={[s.bigBtn, { backgroundColor: "#10B981", marginBottom: 10 }]}
+                onPress={() => {
+                  router.push({
+                    pathname: "/(tabs)/mahsulotlar",
+                    params: { addBarcode: lastScanned.current! },
+                  } as any);
+                }}
+              >
+                <Feather name="plus-circle" size={18} color="#fff" />
+                <Text style={s.bigBtnTxt}>Mahsulot qo'shish</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={[s.bigBtn, { backgroundColor: C.primary }]} onPress={reset}>
               <Feather name="camera" size={18} color="#fff" />
               <Text style={s.bigBtnTxt}>Qayta urinish</Text>
@@ -307,9 +339,16 @@ const s = StyleSheet.create({
   topTitle: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
   topSub: { color: "rgba(255,255,255,0.5)", fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 1 },
 
-  cameraWrap: { height: 270, position: "relative", overflow: "hidden" },
+  cameraWrap: { height: 340, position: "relative", overflow: "hidden" },
+  torchBtn: {
+    position: "absolute", bottom: 12, right: 12, zIndex: 20,
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)",
+  },
   overlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
-  frame: { width: 240, height: 150, position: "relative" },
+  frame: { width: 280, height: 170, position: "relative" },
   corner: { position: "absolute", width: CORNER_SZ, height: CORNER_SZ, borderColor: "#fff", borderWidth: 3 },
   cTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 6 },
   cTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 6 },

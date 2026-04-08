@@ -111,6 +111,9 @@ export default function TabLayout() {
       <Tabs.Screen name="jadval"         options={{ href: null }} />
       <Tabs.Screen name="profile"        options={{ href: null }} />
       <Tabs.Screen name="qarz-daftar"    options={{ href: null }} />
+      <Tabs.Screen name="mijozlar"       options={{ href: null }} />
+      <Tabs.Screen name="sotuv"          options={{ href: null }} />
+      <Tabs.Screen name="xodimlar"       options={{ href: null }} />
     </Tabs>
   );
 }

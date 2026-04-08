@@ -109,8 +109,11 @@ export default function LoginScreen() {
       } else {
         router.replace(destination as any);
       }
-    } catch {
-      Alert.alert("Xato", "Login yoki parol noto'g'ri");
+    } catch (err: any) {
+      const msg = err?.message?.includes("Network")
+        ? "Serverga ulanib bo'lmadi. Internetni tekshiring."
+        : err?.message || "Login yoki parol noto'g'ri";
+      Alert.alert("Xato", msg);
     } finally {
       setIsLoading(false);
     }

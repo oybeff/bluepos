@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Platform, Modal,
-  FlatList, Switch,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,19 +20,36 @@ interface Shop {
   owner: { id: number; username: string; fullName: string; isActive: boolean } | null;
   userCount: number;
 }
-interface SmsTemplate { id: number; nomi: string; matn: string; tur: string; faol: boolean; }
-interface SmsSettings { smsProvider: string; eskizToken: string | null; eskizFrom: string; devsmApiKey: string | null; devsmPassword: string | null; }
+interface SmsSettings { smsProvider: string; eskizToken: string | null; eskizFrom: string; devsmApiKey: string | null; devsmPassword: string | null; devsmFrom?: string; }
 interface SmsLog { id: number; phone: string; matn: string; status: string; createdAt: string; }
+interface SmsTemplate { id: number; nomi: string; matn: string; tur: string; faol: boolean; }
+interface Server { id: number; name: string; url: string; description: string | null; isActive: number; isPrimary: number; lastStatus: string | null; lastChecked: string | null; }
+interface Customer { id: number; fullName: string; phone: string; address: string | null; totalDebt: number; createdAt: string; }
+interface DebtAlert { id: number; mijozIsm: string | null; mijozPhone: string | null; qarzSumma: number | null; qaytarishMuddati: string | null; status: string; }
 
-type Tab = "dokonlar" | "sms" | "shablonlar";
+type Tab = "dokonlar" | "infratuzilma" | "sms" | "shablonlar" | "mijozlar" | "ishchilar" | "buyurtmalar";
+
+type Worker = { id: number; fullName: string; phone: string | null; role: string; oylikStavka: number | null; isActive: number; activeDealCount: number; createdAt: string | null; };
+const WORKER_ROLES: Record<string, { label: string; color: string }> = {
+  tailor:    { label: "Chevar",    color: "#8B5CF6" },
+  installer: { label: "Haydovchi", color: "#059669" },
+  manager:   { label: "Menejer",  color: "#3B82F6" },
+};
+const DEAL_STATUSES = ["barchasi","yangi","tikuvda","tayyor","ornatilmoqda","yopildi"] as const;
+const DEAL_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  barchasi:     { label: "Barchasi",       color: "#6B7280" },
+  yangi:        { label: "Yangi",          color: "#6366F1" },
+  tikuvda:      { label: "Tikuvda",        color: "#F59E0B" },
+  tayyor:       { label: "Tayyor",         color: "#10B981" },
+  ornatilmoqda: { label: "O'rnatilmoqda",  color: "#3B82F6" },
+  yopildi:      { label: "Yopildi",        color: "#6B7280" },
+};
 
 function fmt(n: number) { return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm"; }
 function ago(d: string) {
   const diff = Date.now() - new Date(d).getTime();
   const days = Math.floor(diff / 86400000);
-  if (days === 0) return "Bugun";
-  if (days === 1) return "Kecha";
-  return `${days} kun oldin`;
+  if (days === 0) return "Bugun"; if (days === 1) return "Kecha"; return `${days} kun oldin`;
 }
 
 export default function SuperAdminScreen() {
@@ -43,18 +59,22 @@ export default function SuperAdminScreen() {
   const { user, logout } = useAuth();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [activeTab, setActiveTab] = useState<Tab>("dokonlar");
-  const [modal, setModal] = useState<"create" | "creds" | "topup" | "template" | null>(null);
+  const [modal, setModal] = useState<"create" | "creds" | "topup" | "template" | "server" | null>(null);
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [editTpl, setEditTpl] = useState<SmsTemplate | null>(null);
   const [createForm, setCreateForm] = useState({ name: "", phone: "", address: "", ownerUsername: "", ownerPassword: "", ownerFullName: "" });
   const [credsForm, setCredsForm] = useState({ username: "", password: "" });
   const [topupAmount, setTopupAmount] = useState("");
   const [tplForm, setTplForm] = useState({ nomi: "", matn: "", tur: "umumiy" });
-  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "eskiz", eskizToken: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "" });
+  const [serverForm, setServerForm] = useState({ name: "", url: "", description: "" });
+  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "devsms", eskizToken: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "", devsmFrom: "Blupos" });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testLoading, setTestLoading] = useState(false);
+  const [checkingServer, setCheckingServer] = useState<number | null>(null);
+  const [dealStatusFilter, setDealStatusFilter] = useState<string>("barchasi");
+  const [togglingWorker, setTogglingWorker] = useState<number | null>(null);
 
   if (user?.role !== "super_admin") {
     return (
@@ -66,14 +86,18 @@ export default function SuperAdminScreen() {
     );
   }
 
-  // ─── Queries ───────────────────────────────────────────────
-  const { data: shops = [], isLoading: shopsLoading, refetch: refetchShops } = useQuery<Shop[]>({
+  const { data: shops = [], isLoading: shopsLoading } = useQuery<Shop[]>({
     queryKey: ["super-admin-shops"],
     queryFn: async () => await apiReq("/super-admin/shops") as Shop[],
   });
   const { data: stats } = useQuery<any>({
     queryKey: ["super-admin-stats"],
     queryFn: async () => await apiReq("/super-admin/stats") as any,
+  });
+  const { data: servers = [], isLoading: serversLoading, refetch: refetchServers } = useQuery<Server[]>({
+    queryKey: ["super-admin-servers"],
+    queryFn: async () => await apiReq("/super-admin/servers") as Server[],
+    enabled: activeTab === "infratuzilma",
   });
   const { data: smsSettings } = useQuery<SmsSettings>({
     queryKey: ["sms-settings-super"],
@@ -90,21 +114,41 @@ export default function SuperAdminScreen() {
     queryFn: async () => await apiReq("/sms/logs") as SmsLog[],
     enabled: activeTab === "sms",
   });
+  const { data: allCustomers = [], isLoading: customersLoading } = useQuery<Customer[]>({
+    queryKey: ["sa-customers"],
+    queryFn: () => apiReq<Customer[]>("/customers"),
+    enabled: activeTab === "mijozlar",
+  });
+  const { data: debtAlerts = [], isLoading: alertsLoading, refetch: refetchAlerts } = useQuery<DebtAlert[]>({
+    queryKey: ["sa-debt-alerts"],
+    queryFn: () => apiReq<DebtAlert[]>("/notifications/debt-alerts"),
+    enabled: activeTab === "mijozlar",
+  });
+  const { data: allWorkers = [], isLoading: workersLoading, refetch: refetchWorkers } = useQuery<Worker[]>({
+    queryKey: ["sa-workers"],
+    queryFn: () => apiReq<Worker[]>("/workers?all=true"),
+    enabled: activeTab === "ishchilar",
+  });
+  const { data: allDeals = [], isLoading: dealsLoading } = useQuery<any[]>({
+    queryKey: ["sa-all-deals", dealStatusFilter],
+    queryFn: () => apiReq<any[]>(`/worker-panel/all-deals?status=${dealStatusFilter}`),
+    enabled: activeTab === "buyurtmalar",
+  });
 
   useEffect(() => {
     if (smsSettings && !settingsLoaded) {
       setSmsSettingsForm({
-        smsProvider: smsSettings.smsProvider || "eskiz",
+        smsProvider: smsSettings.smsProvider || "devsms",
         eskizToken: smsSettings.eskizToken || "",
         eskizFrom: smsSettings.eskizFrom || "4546",
         devsmApiKey: smsSettings.devsmApiKey || "",
         devsmPassword: smsSettings.devsmPassword || "",
+        devsmFrom: (smsSettings as any).devsmFrom || "Blupos",
       });
       setSettingsLoaded(true);
     }
   }, [smsSettings, settingsLoaded]);
 
-  // ─── Mutations ─────────────────────────────────────────────
   const createMut = useMutation({
     mutationFn: () => apiReq("/super-admin/shops", { method: "POST", body: JSON.stringify(createForm) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["super-admin-shops", "super-admin-stats"] }); setModal(null); Alert.alert("✅", "Do'kon yaratildi!"); },
@@ -122,7 +166,7 @@ export default function SuperAdminScreen() {
   });
   const toggleMut = useMutation({
     mutationFn: (id: number) => apiReq(`/super-admin/shops/${id}/toggle`, { method: "PATCH", body: JSON.stringify({}) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["super-admin-shops", "super-admin-stats"] }); },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["super-admin-shops", "super-admin-stats"] }),
   });
   const tplCreateMut = useMutation({
     mutationFn: () => apiReq("/sms/templates", { method: "POST", body: JSON.stringify({ ...tplForm, faol: true }) }),
@@ -137,6 +181,23 @@ export default function SuperAdminScreen() {
   const tplDeleteMut = useMutation({
     mutationFn: (id: number) => apiReq(`/sms/templates/${id}`, { method: "DELETE" }),
     onSuccess: () => refetchTpl(),
+  });
+  const serverCreateMut = useMutation({
+    mutationFn: () => apiReq("/super-admin/servers", { method: "POST", body: JSON.stringify(serverForm) }),
+    onSuccess: () => { refetchServers(); setModal(null); Alert.alert("✅", "Server qo'shildi!"); },
+    onError: (e: any) => Alert.alert("Xato", e.message),
+  });
+  const serverToggleMut = useMutation({
+    mutationFn: (id: number) => apiReq(`/super-admin/servers/${id}/toggle`, { method: "PATCH", body: JSON.stringify({}) }),
+    onSuccess: () => refetchServers(),
+  });
+  const serverSetPrimaryMut = useMutation({
+    mutationFn: (id: number) => apiReq(`/super-admin/servers/${id}/set-primary`, { method: "PATCH", body: JSON.stringify({}) }),
+    onSuccess: () => { refetchServers(); Alert.alert("✅", "Asosiy server o'zgartirildi!"); },
+  });
+  const serverDeleteMut = useMutation({
+    mutationFn: (id: number) => apiReq(`/super-admin/servers/${id}`, { method: "DELETE" }),
+    onSuccess: () => refetchServers(),
   });
 
   async function saveSettings() {
@@ -160,13 +221,22 @@ export default function SuperAdminScreen() {
     finally { setTestLoading(false); }
   }
 
+  async function checkServer(id: number) {
+    setCheckingServer(id);
+    try {
+      const res = await apiReq(`/super-admin/servers/${id}/check`, { method: "POST", body: JSON.stringify({}) }) as any;
+      Alert.alert(res.status === "online" ? "✅ Online" : "❌ Offline", `Server holati: ${res.status}`);
+      refetchServers();
+    } catch { Alert.alert("Xato", "Tekshirishda xato"); }
+    finally { setCheckingServer(null); }
+  }
+
   const provider = smsSettingsForm.smsProvider;
 
-  // ─── DO'KONLAR TAB ──────────────────────────────────────────
+  // ─── DO'KONLAR ─────────────────────────────────────────────
   function renderDokonlar() {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
-        {/* Stats */}
         {stats && (
           <View style={s.statsRow}>
             {[
@@ -182,13 +252,11 @@ export default function SuperAdminScreen() {
             ))}
           </View>
         )}
-
         {shopsLoading && <ActivityIndicator color={C.primary} />}
-
         {shops.map(shop => (
           <View key={shop.id} style={[s.shopCard, { backgroundColor: C.card, borderColor: C.border }]}>
             <View style={s.shopCardTop}>
-              <View style={[s.shopDot, { backgroundColor: shop.isActive && shop.subscriptionActive ? "#10B981" : "#EF4444" }]} />
+              <View style={[s.shopDot, { backgroundColor: shop.isActive ? "#10B981" : "#EF4444" }]} />
               <View style={{ flex: 1 }}>
                 <Text style={[s.shopName, { color: C.text }]}>{shop.name}</Text>
                 <Text style={[s.shopMeta, { color: C.textSecondary }]}>{shop.phone}{shop.address ? " · " + shop.address : ""}</Text>
@@ -202,118 +270,200 @@ export default function SuperAdminScreen() {
               </View>
             </View>
             <View style={[s.shopActions, { borderTopColor: C.border }]}>
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: "#D1FAE5" }]}
-                onPress={() => { setSelectedShop(shop); setTopupAmount(""); setModal("topup"); }}
-              >
+              <TouchableOpacity style={[s.actionBtn, { backgroundColor: "#D1FAE5" }]}
+                onPress={() => { setSelectedShop(shop); setTopupAmount(""); setModal("topup"); }}>
                 <Feather name="dollar-sign" size={15} color="#059669" />
                 <Text style={[s.actionBtnTxt, { color: "#059669" }]}>Balans</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: "#EEF2FF" }]}
-                onPress={() => { setSelectedShop(shop); setCredsForm({ username: shop.owner?.username || "", password: "" }); setModal("creds"); }}
-              >
+              <TouchableOpacity style={[s.actionBtn, { backgroundColor: "#EEF2FF" }]}
+                onPress={() => { setSelectedShop(shop); setCredsForm({ username: shop.owner?.username || "", password: "" }); setModal("creds"); }}>
                 <Feather name="key" size={15} color={C.primary} />
                 <Text style={[s.actionBtnTxt, { color: C.primary }]}>Login</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: shop.isActive ? "#FEE2E2" : "#D1FAE5" }]}
-                onPress={() => {
-                  Alert.alert(shop.isActive ? "Bloklash" : "Faollashtirish", `${shop.name} ni ${shop.isActive ? "bloklamoqchi" : "faollashtirishni"} istaysizmi?`, [
-                    { text: "Bekor" }, { text: "Ha", onPress: () => toggleMut.mutate(shop.id) },
-                  ]);
-                }}
-              >
+              <TouchableOpacity style={[s.actionBtn, { backgroundColor: shop.isActive ? "#FEE2E2" : "#D1FAE5" }]}
+                onPress={() => Alert.alert(shop.isActive ? "Bloklash" : "Ochish", `"${shop.name}" ni ${shop.isActive ? "bloklamoqchi" : "faollashtirishni"} istaysizmi?`, [
+                  { text: "Bekor" }, { text: "Ha", onPress: () => toggleMut.mutate(shop.id) },
+                ])}>
                 <Feather name={shop.isActive ? "toggle-right" : "toggle-left"} size={15} color={shop.isActive ? "#DC2626" : "#059669"} />
                 <Text style={[s.actionBtnTxt, { color: shop.isActive ? "#DC2626" : "#059669" }]}>{shop.isActive ? "Blok" : "Ochish"}</Text>
               </TouchableOpacity>
             </View>
           </View>
         ))}
+        {shops.length === 0 && !shopsLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="shopping-bag" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali do'kon yo'q</Text>
+          </View>
+        )}
       </ScrollView>
     );
   }
 
-  // ─── SMS SOZLAMALAR TAB ────────────────────────────────────
+  // ─── INFRATUZILMA ──────────────────────────────────────────
+  function renderInfratuzilma() {
+    return (
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
+        <View style={[s.infoBanner, { backgroundColor: "#EEF2FF", borderColor: C.border }]}>
+          <Feather name="server" size={16} color={C.primary} />
+          <Text style={[s.infoBannerTxt, { color: C.primary, flex: 1 }]}>
+            Serverlarni bu yerdan boshqarishingiz, holat tekshirishingiz va asosiy serverni almashtirishingiz mumkin.
+          </Text>
+        </View>
+
+        {serversLoading && <ActivityIndicator color={C.primary} />}
+
+        {servers.map(sv => {
+          const isOnline = sv.lastStatus === "online";
+          const isOffline = sv.lastStatus === "offline";
+          const statusColor = isOnline ? "#10B981" : isOffline ? "#EF4444" : "#F59E0B";
+          const statusLabel = isOnline ? "Online" : isOffline ? "Offline" : "Noma'lum";
+          return (
+            <View key={sv.id} style={[s.serverCard, { backgroundColor: C.card, borderColor: sv.isPrimary ? C.primary : C.border, borderWidth: sv.isPrimary ? 2 : 1 }]}>
+              <View style={s.serverCardTop}>
+                <View style={[s.serverIconWrap, { backgroundColor: sv.isActive ? "#EEF2FF" : "#F3F4F6" }]}>
+                  <Feather name="server" size={20} color={sv.isActive ? C.primary : C.textSecondary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={[s.serverName, { color: C.text }]}>{sv.name}</Text>
+                    {!!sv.isPrimary && (
+                      <View style={[s.primaryBadge, { backgroundColor: C.primary }]}>
+                        <Text style={s.primaryBadgeTxt}>ASOSIY</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[s.serverUrl, { color: C.primary }]} numberOfLines={1}>{sv.url}</Text>
+                  {sv.description ? <Text style={[s.serverDesc, { color: C.textSecondary }]}>{sv.description}</Text> : null}
+                </View>
+                <View style={[s.statusDot, { backgroundColor: statusColor }]} />
+              </View>
+
+              <View style={[s.serverStatus, { borderTopColor: C.border }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Feather name="activity" size={13} color={statusColor} />
+                  <Text style={[s.serverStatusTxt, { color: statusColor }]}>{statusLabel}</Text>
+                  {sv.lastChecked && (
+                    <Text style={[s.serverLastCheck, { color: C.textSecondary }]}>
+                      · {new Date(sv.lastChecked).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}
+                    </Text>
+                  )}
+                </View>
+              </View>
+
+              <View style={[s.serverActions, { borderTopColor: C.border }]}>
+                <TouchableOpacity style={[s.srvBtn, { backgroundColor: "#EEF2FF" }]}
+                  onPress={() => checkServer(sv.id)} disabled={checkingServer === sv.id}>
+                  {checkingServer === sv.id
+                    ? <ActivityIndicator size="small" color={C.primary} />
+                    : <Feather name="refresh-cw" size={14} color={C.primary} />}
+                  <Text style={[s.srvBtnTxt, { color: C.primary }]}>Tekshirish</Text>
+                </TouchableOpacity>
+
+                {!sv.isPrimary && (
+                  <TouchableOpacity style={[s.srvBtn, { backgroundColor: "#D1FAE5" }]}
+                    onPress={() => Alert.alert("Asosiy qilish", `"${sv.name}" ni asosiy server sifatida belgilash?`, [
+                      { text: "Bekor" }, { text: "Ha", onPress: () => serverSetPrimaryMut.mutate(sv.id) },
+                    ])}>
+                    <Feather name="star" size={14} color="#059669" />
+                    <Text style={[s.srvBtnTxt, { color: "#059669" }]}>Asosiy</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity style={[s.srvBtn, { backgroundColor: sv.isActive ? "#FEE2E2" : "#D1FAE5" }]}
+                  onPress={() => serverToggleMut.mutate(sv.id)}>
+                  <Feather name={sv.isActive ? "pause" : "play"} size={14} color={sv.isActive ? "#DC2626" : "#059669"} />
+                  <Text style={[s.srvBtnTxt, { color: sv.isActive ? "#DC2626" : "#059669" }]}>{sv.isActive ? "O'chirish" : "Yoqish"}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[s.srvBtn, { backgroundColor: "#FEE2E2" }]}
+                  onPress={() => Alert.alert("O'chirish", `"${sv.name}" ni o'chirishni istaysizmi?`, [
+                    { text: "Bekor" }, { text: "O'chirish", style: "destructive", onPress: () => serverDeleteMut.mutate(sv.id) },
+                  ])}>
+                  <Feather name="trash-2" size={14} color="#DC2626" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+
+        {servers.length === 0 && !serversLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="server" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali server qo'shilmagan</Text>
+            <Text style={[s.emptySubTxt, { color: C.textSecondary }]}>+ tugmasi orqali yangi server qo'shing</Text>
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  // ─── SMS SOZLAMALAR ────────────────────────────────────────
   function renderSms() {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
-        {/* Provider */}
         <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
           <Text style={[s.cardTitle, { color: C.text }]}>SMS Provider</Text>
           <View style={s.providerRow}>
-            {["eskiz", "devsms"].map(p => (
-              <TouchableOpacity
-                key={p}
-                style={[s.providerBtn, { borderColor: provider === p ? C.primary : C.border, backgroundColor: provider === p ? C.surface : C.card }]}
-                onPress={() => setSmsSettingsForm(f => ({ ...f, smsProvider: p }))}
-              >
-                <Feather name={p === "eskiz" ? "zap" : "smartphone"} size={16} color={provider === p ? C.primary : C.textSecondary} />
+            {["devsms", "eskiz"].map(p => (
+              <TouchableOpacity key={p}
+                style={[s.providerBtn, { borderColor: provider === p ? C.primary : C.border, backgroundColor: provider === p ? "#EEF2FF" : C.card }]}
+                onPress={() => setSmsSettingsForm(f => ({ ...f, smsProvider: p }))}>
+                <Feather name={p === "devsms" ? "smartphone" : "zap"} size={16} color={provider === p ? C.primary : C.textSecondary} />
                 <Text style={[s.providerBtnTxt, { color: provider === p ? C.primary : C.textSecondary }]}>
-                  {p === "eskiz" ? "Eskiz.uz" : "DevSMS.uz"}
+                  {p === "devsms" ? "DevSMS.uz" : "Eskiz.uz"}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {provider === "eskiz" ? (
+          {provider === "devsms" ? (
+            <>
+              <View style={[s.infoBanner, { backgroundColor: "#F0FDF4" }]}>
+                <Feather name="info" size={13} color="#059669" />
+                <Text style={[s.infoBannerTxt, { color: "#059669" }]}>devsms.uz dan API kalit va parol oling.</Text>
+              </View>
+              <SmsField label="DevSMS API kaliti" value={smsSettingsForm.devsmApiKey ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmApiKey: v }))} placeholder="API kalit..." />
+              <SmsField label="DevSMS Parol" value={smsSettingsForm.devsmPassword ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmPassword: v }))} placeholder="Parol..." secure />
+              <SmsField label="Yuboruvchi nomi" value={smsSettingsForm.devsmFrom ?? "Blupos"} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmFrom: v }))} placeholder="Blupos" />
+            </>
+          ) : (
             <>
               <SmsField label="Eskiz Token" value={smsSettingsForm.eskizToken ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizToken: v }))} placeholder="Bearer token..." />
               <SmsField label="Yuboruvchi nomi" value={smsSettingsForm.eskizFrom ?? "4546"} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizFrom: v }))} placeholder="4546" />
             </>
-          ) : (
-            <>
-              <View style={[s.infoBanner, { backgroundColor: "#EEF2FF" }]}>
-                <Feather name="info" size={14} color={C.primary} />
-                <Text style={[s.infoBannerTxt, { color: C.primary }]}>DevSMS.uz — O'zbekiston SMS xizmati. devsms.uz saytidan API kalitini oling.</Text>
-              </View>
-              <SmsField label="DevSMS API kaliti" value={smsSettingsForm.devsmApiKey ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmApiKey: v }))} placeholder="API kalit..." />
-              <SmsField label="DevSMS Parol" value={smsSettingsForm.devsmPassword ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmPassword: v }))} placeholder="Parol..." secure />
-            </>
           )}
 
-          <TouchableOpacity
-            style={[s.saveBtn, { backgroundColor: savingSettings ? C.border : C.primary }]}
-            onPress={saveSettings}
-            disabled={savingSettings}
-          >
+          <TouchableOpacity style={[s.saveBtn, { backgroundColor: savingSettings ? C.border : C.primary }]}
+            onPress={saveSettings} disabled={savingSettings}>
             {savingSettings ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.saveBtnTxt}>Saqlash</Text>}
           </TouchableOpacity>
         </View>
 
-        {/* Test SMS */}
         <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
-          <Text style={[s.cardTitle, { color: C.text }]}>Test SMS</Text>
+          <Text style={[s.cardTitle, { color: C.text }]}>Test SMS yuborish</Text>
           <View style={s.testRow}>
-            <TextInput
-              style={[s.testInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
-              value={testPhone}
-              onChangeText={setTestPhone}
-              placeholder="+998901234567"
-              placeholderTextColor={C.textSecondary}
-              keyboardType="phone-pad"
-            />
-            <TouchableOpacity
-              style={[s.testBtn, { backgroundColor: C.primary }]}
-              onPress={sendTestSms}
-              disabled={testLoading || !testPhone}
-            >
-              {testLoading ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="zap" size={16} color="#fff" />}
+            <TextInput style={[s.testInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
+              value={testPhone} onChangeText={setTestPhone}
+              placeholder="+998901234567" placeholderTextColor={C.textSecondary} keyboardType="phone-pad" />
+            <TouchableOpacity style={[s.testBtn, { backgroundColor: C.primary }]} onPress={sendTestSms} disabled={testLoading || !testPhone}>
+              {testLoading ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={16} color="#fff" />}
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Logs */}
         <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
           <Text style={[s.cardTitle, { color: C.text }]}>SMS Loglar ({logs.length})</Text>
-          {logs.slice(0, 20).map(log => (
+          {logs.slice(0, 30).map(log => (
             <View key={log.id} style={[s.logRow, { borderBottomColor: C.border }]}>
               <View style={[s.logDot, { backgroundColor: log.status === "sent" ? "#10B981" : "#EF4444" }]} />
               <View style={{ flex: 1 }}>
                 <Text style={[s.logPhone, { color: C.text }]}>{log.phone}</Text>
                 <Text style={[s.logMatn, { color: C.textSecondary }]} numberOfLines={1}>{log.matn}</Text>
               </View>
-              <Text style={[s.logTime, { color: C.textSecondary }]}>{new Date(log.createdAt).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}</Text>
+              <Text style={[s.logTime, { color: C.textSecondary }]}>
+                {new Date(log.createdAt).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })}
+              </Text>
             </View>
           ))}
           {logs.length === 0 && <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali log yo'q</Text>}
@@ -322,7 +472,320 @@ export default function SuperAdminScreen() {
     );
   }
 
-  // ─── SHABLONLAR TAB ────────────────────────────────────────
+  // ─── MIJOZLAR ──────────────────────────────────────────────
+  const [bulkSmsText, setBulkSmsText] = useState("");
+  const [bulkSmsSending, setBulkSmsSending] = useState(false);
+  const [alertSending, setAlertSending] = useState(false);
+
+  const debtorCount = allCustomers.filter(c => (c.totalDebt || 0) > 0).length;
+  const totalDebtSum = allCustomers.reduce((s, c) => s + (c.totalDebt || 0), 0);
+
+  async function sendBulkSms() {
+    if (!bulkSmsText.trim()) { Alert.alert("SMS matnini kiriting"); return; }
+    setBulkSmsSending(true);
+    try {
+      const res = await apiReq<any>("/customers/sms-campaign", { method: "POST", body: JSON.stringify({ matn: bulkSmsText }) });
+      Alert.alert("✅ Yuborildi!", `${res.sent}/${res.total} mijozga SMS yuborildi`);
+      setBulkSmsText("");
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setBulkSmsSending(false); }
+  }
+
+  async function sendDebtReminders() {
+    setAlertSending(true);
+    try {
+      const res = await apiReq<any>("/notifications/send-debt-alerts", { method: "POST", body: JSON.stringify({}) });
+      Alert.alert("✅ Yuborildi!", `${res.sent} ta qarz eslatmasi yuborildi`);
+      refetchAlerts();
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setAlertSending(false); }
+  }
+
+  function renderMijozlar() {
+    return (
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
+        {/* Stats */}
+        <View style={s.statsRow}>
+          {[
+            { lbl: "Jami mijozlar", val: allCustomers.length, color: C.primary },
+            { lbl: "Qarzdorlar", val: debtorCount, color: "#EF4444" },
+            { lbl: "2 kun ichida", val: debtAlerts.length, color: "#F59E0B" },
+            { lbl: "Jami qarz", val: null, extra: totalDebtSum > 0 ? fmt(totalDebtSum) : "0", color: "#10B981" },
+          ].map((st, i) => (
+            <View key={i} style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              {st.val !== null ? (
+                <Text style={[s.statVal, { color: st.color }]}>{st.val}</Text>
+              ) : (
+                <Text style={[s.statVal, { color: st.color, fontSize: 12 }]}>{st.extra}</Text>
+              )}
+              <Text style={[s.statLbl, { color: C.textSecondary }]}>{st.lbl}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Debt alerts */}
+        {debtAlerts.length > 0 && (
+          <View style={[s.card, { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={[s.cardTitle, { color: "#92400E" }]}>Yaqinlashayotgan to'lovlar ({debtAlerts.length})</Text>
+              <TouchableOpacity onPress={sendDebtReminders} disabled={alertSending}
+                style={[s.saveBtn, { backgroundColor: "#D97706", paddingHorizontal: 12, height: 36 }]}>
+                {alertSending ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <Text style={[s.saveBtnTxt, { fontSize: 12 }]}>SMS eslatma</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            {debtAlerts.map(d => {
+              const days = d.qaytarishMuddati ? Math.ceil((new Date(d.qaytarishMuddati).getTime() - Date.now()) / 86400000) : null;
+              return (
+                <View key={d.id} style={[s.logRow, { borderBottomColor: "#FDE68A" }]}>
+                  <View style={[s.logDot, { backgroundColor: days !== null && days <= 0 ? "#EF4444" : "#F59E0B" }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.logPhone, { color: "#78350F" }]}>{d.mijozIsm || "Noma'lum"} · {d.mijozPhone}</Text>
+                    <Text style={[s.logMatn, { color: "#92400E" }]}>
+                      Qarz: {fmt(d.qarzSumma ?? 0)} · {d.qaytarishMuddati ?? "—"}
+                      {days !== null ? ` (${days <= 0 ? Math.abs(days) + " kun o'tgan" : days + " kun qoldi"})` : ""}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Bulk SMS */}
+        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
+          <Text style={[s.cardTitle, { color: C.text }]}>Aksiya SMS (barcha {allCustomers.length} mijozga)</Text>
+          <Text style={[s.mLbl, { color: C.textSecondary }]}>&#123;ism&#125; - mijoz ismi almashadi</Text>
+          <TextInput style={[s.mTextArea, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
+            value={bulkSmsText} onChangeText={setBulkSmsText}
+            placeholder="SMS matnini kiriting..." placeholderTextColor={C.textSecondary}
+            multiline numberOfLines={3} />
+          <TouchableOpacity style={[s.saveBtn, { backgroundColor: bulkSmsSending ? C.border : "#059669" }]}
+            onPress={sendBulkSms} disabled={bulkSmsSending || !bulkSmsText.trim()}>
+            {bulkSmsSending ? <ActivityIndicator color="#fff" size="small" /> : (
+              <Text style={s.saveBtnTxt}>Barchaga yuborish</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Customer list */}
+        <Text style={[s.mLbl, { color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.8 }]}>
+          Mijozlar ro'yxati
+        </Text>
+        {customersLoading && <ActivityIndicator color={C.primary} />}
+        {allCustomers.slice(0, 20).map(c => (
+          <View key={c.id} style={[s.logRow, { borderBottomColor: C.border, paddingVertical: 10 }]}>
+            <View style={[s.logDot, { backgroundColor: (c.totalDebt || 0) > 0 ? "#EF4444" : "#10B981", width: 10, height: 10, borderRadius: 5 }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[s.logPhone, { color: C.text }]}>{c.fullName}</Text>
+              <Text style={[s.logMatn, { color: C.textSecondary }]}>{c.phone}{c.address ? ` · ${c.address}` : ""}</Text>
+            </View>
+            {(c.totalDebt || 0) > 0 && (
+              <Text style={{ color: "#DC2626", fontSize: 12, fontFamily: "Inter_600SemiBold" }}>{fmt(c.totalDebt)}</Text>
+            )}
+          </View>
+        ))}
+        {allCustomers.length === 0 && !customersLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="users" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali mijoz yo'q</Text>
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  // ─── ISHCHILAR ─────────────────────────────────────────────
+  async function toggleWorker(worker: Worker) {
+    setTogglingWorker(worker.id);
+    try {
+      await apiReq(`/workers/${worker.id}`, { method: "PUT", body: JSON.stringify({ isActive: worker.isActive ? 0 : 1 }) });
+      refetchWorkers();
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setTogglingWorker(null); }
+  }
+
+  function renderIshchilar() {
+    const tailors   = allWorkers.filter(w => w.role === "tailor");
+    const installers = allWorkers.filter(w => w.role === "installer");
+    const managers  = allWorkers.filter(w => w.role === "manager");
+    const totalActive = allWorkers.filter(w => w.isActive).length;
+
+    return (
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
+        {/* Summary */}
+        <View style={s.statsRow}>
+          {[
+            { lbl: "Jami xodim",  val: allWorkers.length,  color: C.primary },
+            { lbl: "Faol",        val: totalActive,         color: "#10B981" },
+            { lbl: "Chevar",      val: tailors.length,      color: "#8B5CF6" },
+            { lbl: "Haydovchi",   val: installers.length,   color: "#059669" },
+          ].map((st, i) => (
+            <View key={i} style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={[s.statVal, { color: st.color }]}>{st.val}</Text>
+              <Text style={[s.statLbl, { color: C.textSecondary }]}>{st.lbl}</Text>
+            </View>
+          ))}
+        </View>
+
+        {workersLoading && <ActivityIndicator color={C.primary} />}
+
+        {([
+          { list: tailors,   label: "🧵 Chevarlar",    color: "#8B5CF6" },
+          { list: installers, label: "🚗 Haydovchilar", color: "#059669" },
+          { list: managers,  label: "👔 Menejerlar",   color: "#3B82F6" },
+        ] as { list: Worker[]; label: string; color: string }[]).map(group => (
+          group.list.length > 0 ? (
+            <View key={group.label}>
+              <Text style={[s.wGroupTitle, { color: group.color }]}>{group.label} ({group.list.length})</Text>
+              {group.list.map(w => (
+                <View key={w.id} style={[s.wCard, { backgroundColor: C.card, borderColor: w.isActive ? C.border : "#FEE2E2" }]}>
+                  <View style={[s.wIconWrap, { backgroundColor: group.color + "15" }]}>
+                    <Feather name={w.role === "tailor" ? "scissors" : w.role === "installer" ? "truck" : "briefcase"} size={18} color={group.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.wName, { color: C.text }]}>{w.fullName}</Text>
+                    <Text style={[s.wMeta, { color: C.textSecondary }]}>
+                      {w.phone || "Telefon yo'q"} · {w.activeDealCount} ta faol ish
+                    </Text>
+                    {w.oylikStavka ? (
+                      <Text style={[s.wMeta, { color: "#10B981" }]}>Stavka: {fmt(w.oylikStavka)}</Text>
+                    ) : null}
+                  </View>
+                  <View style={{ alignItems: "flex-end", gap: 6 }}>
+                    <View style={[s.wBadge, { backgroundColor: w.isActive ? "#D1FAE5" : "#FEE2E2" }]}>
+                      <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: w.isActive ? "#059669" : "#DC2626" }}>
+                        {w.isActive ? "Faol" : "Bloklangan"}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[s.wToggleBtn, { backgroundColor: w.isActive ? "#FEE2E2" : "#D1FAE5" }]}
+                      onPress={() => toggleWorker(w)}
+                      disabled={togglingWorker === w.id}
+                    >
+                      {togglingWorker === w.id
+                        ? <ActivityIndicator size="small" color={w.isActive ? "#DC2626" : "#059669"} />
+                        : <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: w.isActive ? "#DC2626" : "#059669" }}>
+                            {w.isActive ? "Bloklash" : "Ochish"}
+                          </Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null
+        ))}
+
+        {allWorkers.length === 0 && !workersLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="users" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali xodim qo'shilmagan</Text>
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  // ─── BUYURTMALAR ───────────────────────────────────────────
+  function renderBuyurtmalar() {
+    const totalNarx = allDeals.reduce((s: number, d: any) => s + (d.totalNarx || 0), 0);
+    const totalQarz = allDeals.reduce((s: number, d: any) => s + (d.qarzSumma || 0), 0);
+
+    return (
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 100 }}>
+        {/* Status filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 4 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {DEAL_STATUSES.map(st => {
+              const info = DEAL_STATUS_LABELS[st];
+              const active = dealStatusFilter === st;
+              return (
+                <TouchableOpacity
+                  key={st}
+                  style={[s.dealFilterBtn, { backgroundColor: active ? info.color : C.card, borderColor: active ? info.color : C.border }]}
+                  onPress={() => setDealStatusFilter(st)}
+                >
+                  <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: active ? "#fff" : C.textSecondary }}>
+                    {info.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+
+        {/* Summary row */}
+        <View style={s.statsRow}>
+          {[
+            { lbl: "Buyurtmalar", val: String(allDeals.length),     color: C.primary },
+            { lbl: "Jami summa",  val: fmt(totalNarx),              color: "#10B981" },
+            { lbl: "Jami qarz",   val: totalQarz > 0 ? fmt(totalQarz) : "Yo'q", color: totalQarz > 0 ? "#EF4444" : C.textSecondary },
+          ].map((st, i) => (
+            <View key={i} style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={[{ fontSize: 14, fontFamily: "Inter_700Bold", color: st.color }]}>{st.val}</Text>
+              <Text style={[s.statLbl, { color: C.textSecondary }]}>{st.lbl}</Text>
+            </View>
+          ))}
+        </View>
+
+        {dealsLoading && <ActivityIndicator color={C.primary} />}
+
+        {allDeals.map((d: any) => {
+          const stInfo = DEAL_STATUS_LABELS[d.status] || { label: d.status, color: "#6B7280" };
+          const date = d.createdAt ? new Date(d.createdAt).toLocaleDateString("uz-UZ") : "—";
+          return (
+            <View key={d.id} style={[s.dealCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <View style={s.dealCardTop}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.dealName, { color: C.text }]}>{d.mijozIsm || "Noma'lum"}</Text>
+                  <Text style={[s.dealMeta, { color: C.textSecondary }]}>#{d.id} · {date} · {d.mijozPhone || ""}</Text>
+                </View>
+                <View style={[s.dealBadge, { backgroundColor: stInfo.color + "20" }]}>
+                  <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: stInfo.color }}>{stInfo.label}</Text>
+                </View>
+              </View>
+              <View style={s.dealInfoRow}>
+                {d.totalNarx ? (
+                  <View style={s.dealInfoItem}>
+                    <Text style={[s.dealInfoLbl, { color: C.textSecondary }]}>Jami</Text>
+                    <Text style={[s.dealInfoVal, { color: "#10B981" }]}>{fmt(d.totalNarx)}</Text>
+                  </View>
+                ) : null}
+                {d.qarzSumma > 0 ? (
+                  <View style={s.dealInfoItem}>
+                    <Text style={[s.dealInfoLbl, { color: C.textSecondary }]}>Qarz</Text>
+                    <Text style={[s.dealInfoVal, { color: "#EF4444" }]}>{fmt(d.qarzSumma)}</Text>
+                  </View>
+                ) : null}
+                {d.totalMaterial ? (
+                  <View style={s.dealInfoItem}>
+                    <Text style={[s.dealInfoLbl, { color: C.textSecondary }]}>Material</Text>
+                    <Text style={[s.dealInfoVal, { color: "#8B5CF6" }]}>{d.totalMaterial.toFixed(1)} m²</Text>
+                  </View>
+                ) : null}
+                {d.manzil ? (
+                  <View style={[s.dealInfoItem, { flex: 2 }]}>
+                    <Text style={[s.dealInfoLbl, { color: C.textSecondary }]}>Manzil</Text>
+                    <Text style={[s.dealInfoVal, { color: C.text, fontSize: 12 }]} numberOfLines={1}>{d.manzil}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          );
+        })}
+
+        {allDeals.length === 0 && !dealsLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="shopping-bag" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Bu statusda buyurtma yo'q</Text>
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  // ─── SHABLONLAR ────────────────────────────────────────────
   function renderShablonlar() {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 100 }}>
@@ -338,23 +801,19 @@ export default function SuperAdminScreen() {
             <View style={s.tplHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={[s.tplName, { color: C.text }]}>{t.nomi}</Text>
-                <View style={[s.tplBadge, { backgroundColor: C.surface }]}>
+                <View style={[s.tplBadge, { backgroundColor: "#EEF2FF" }]}>
                   <Text style={[s.tplBadgeTxt, { color: C.primary }]}>{t.tur}</Text>
                 </View>
               </View>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                <TouchableOpacity
-                  style={[s.tplActionBtn, { backgroundColor: "#EEF2FF" }]}
-                  onPress={() => { setEditTpl(t); setTplForm({ nomi: t.nomi, matn: t.matn, tur: t.tur }); setModal("template"); }}
-                >
+                <TouchableOpacity style={[s.tplActionBtn, { backgroundColor: "#EEF2FF" }]}
+                  onPress={() => { setEditTpl(t); setTplForm({ nomi: t.nomi, matn: t.matn, tur: t.tur }); setModal("template"); }}>
                   <Feather name="edit-2" size={14} color={C.primary} />
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.tplActionBtn, { backgroundColor: "#FEE2E2" }]}
+                <TouchableOpacity style={[s.tplActionBtn, { backgroundColor: "#FEE2E2" }]}
                   onPress={() => Alert.alert("O'chirish", `"${t.nomi}" ni o'chirishni istaysizmi?`, [
                     { text: "Bekor" }, { text: "O'chirish", style: "destructive", onPress: () => tplDeleteMut.mutate(t.id) },
-                  ])}
-                >
+                  ])}>
                   <Feather name="trash-2" size={14} color="#DC2626" />
                 </TouchableOpacity>
               </View>
@@ -370,64 +829,58 @@ export default function SuperAdminScreen() {
 
   return (
     <View style={[s.root, { backgroundColor: C.background }]}>
-      {/* Header */}
       <View style={[s.header, { paddingTop: topPad, backgroundColor: C.card, borderBottomColor: C.border }]}>
         <View style={[s.headerIcon, { backgroundColor: C.primary }]}>
           <Feather name="shield" size={18} color="#fff" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[s.headerTitle, { color: C.text }]}>Super Admin</Text>
-          <Text style={[s.headerSub, { color: C.textSecondary }]}>im_yakuboff98</Text>
+          <Text style={[s.headerSub, { color: C.textSecondary }]}>{user?.username}</Text>
         </View>
-        <TouchableOpacity
-          style={[s.logoutBtn, { backgroundColor: "#FEE2E2" }]}
+        <TouchableOpacity style={[s.logoutBtn, { backgroundColor: "#FEE2E2" }]}
           onPress={() => Alert.alert("Chiqish", "Profildan chiqmoqchimisiz?", [
             { text: "Bekor" },
             { text: "Chiqish", style: "destructive", onPress: async () => { await logout(); router.replace("/login"); } },
-          ])}
-        >
+          ])}>
           <Feather name="log-out" size={16} color="#DC2626" />
         </TouchableOpacity>
       </View>
 
-      {/* Tabs */}
-      <View style={[s.tabs, { backgroundColor: C.card, borderBottomColor: C.border }]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[s.tabsWrap, { backgroundColor: C.card, borderBottomColor: C.border }]}
+        contentContainerStyle={s.tabs}>
         {[
-          { key: "dokonlar" as Tab, lbl: "Do'konlar", icon: "shopping-bag" as const },
-          { key: "sms" as Tab, lbl: "SMS", icon: "message-square" as const },
-          { key: "shablonlar" as Tab, lbl: "Shablonlar", icon: "message-circle" as const },
+          { key: "dokonlar" as Tab,     lbl: "Do'konlar",    icon: "shopping-bag" as const },
+          { key: "infratuzilma" as Tab, lbl: "Infratuzilma", icon: "server" as const },
+          { key: "buyurtmalar" as Tab,  lbl: "Buyurtmalar",  icon: "list" as const },
+          { key: "ishchilar" as Tab,    lbl: "Ishchilar",    icon: "users" as const },
+          { key: "mijozlar" as Tab,     lbl: "Mijozlar",     icon: "user" as const },
+          { key: "sms" as Tab,          lbl: "DevSMS",       icon: "message-square" as const },
+          { key: "shablonlar" as Tab,   lbl: "Shablonlar",   icon: "message-circle" as const },
         ].map(t => (
-          <TouchableOpacity
-            key={t.key}
+          <TouchableOpacity key={t.key}
             style={[s.tabBtn, activeTab === t.key && { borderBottomWidth: 2.5, borderBottomColor: C.primary }]}
-            onPress={() => setActiveTab(t.key)}
-          >
+            onPress={() => setActiveTab(t.key)}>
             <Feather name={t.icon} size={14} color={activeTab === t.key ? C.primary : C.textSecondary} />
             <Text style={[s.tabBtnTxt, { color: activeTab === t.key ? C.primary : C.textSecondary }]}>{t.lbl}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
-      {/* Content */}
       {activeTab === "dokonlar" && renderDokonlar()}
+      {activeTab === "infratuzilma" && renderInfratuzilma()}
       {activeTab === "sms" && renderSms()}
       {activeTab === "shablonlar" && renderShablonlar()}
+      {activeTab === "mijozlar" && renderMijozlar()}
+      {activeTab === "ishchilar" && renderIshchilar()}
+      {activeTab === "buyurtmalar" && renderBuyurtmalar()}
 
-      {/* FAB */}
-      {(activeTab === "dokonlar" || activeTab === "shablonlar") && (
-        <TouchableOpacity
-          style={[s.fab, { backgroundColor: C.primary, bottom: insets.bottom + 20 }]}
+      {(activeTab === "dokonlar" || activeTab === "shablonlar" || activeTab === "infratuzilma") && (
+        <TouchableOpacity style={[s.fab, { backgroundColor: C.primary, bottom: insets.bottom + 20 }]}
           onPress={() => {
-            if (activeTab === "dokonlar") {
-              setCreateForm({ name: "", phone: "", address: "", ownerUsername: "", ownerPassword: "", ownerFullName: "" });
-              setModal("create");
-            } else {
-              setEditTpl(null);
-              setTplForm({ nomi: "", matn: "", tur: "umumiy" });
-              setModal("template");
-            }
-          }}
-        >
+            if (activeTab === "dokonlar") { setCreateForm({ name: "", phone: "", address: "", ownerUsername: "", ownerPassword: "", ownerFullName: "" }); setModal("create"); }
+            else if (activeTab === "shablonlar") { setEditTpl(null); setTplForm({ nomi: "", matn: "", tur: "umumiy" }); setModal("template"); }
+            else if (activeTab === "infratuzilma") { setServerForm({ name: "", url: "", description: "" }); setModal("server"); }
+          }}>
           <Feather name="plus" size={22} color="#fff" />
         </TouchableOpacity>
       )}
@@ -443,100 +896,62 @@ export default function SuperAdminScreen() {
           <Text style={[s.dividerLbl, { color: C.textSecondary }]}>ADMIN KIRISH MA'LUMOTLARI</Text>
           <MField label="Login *" value={createForm.ownerUsername} onChange={v => setCreateForm(f => ({ ...f, ownerUsername: v }))} placeholder="pardaplus_admin" />
           <MField label="Parol *" value={createForm.ownerPassword} onChange={v => setCreateForm(f => ({ ...f, ownerPassword: v }))} placeholder="Kamida 6 ta belgi" secure />
-          <TouchableOpacity
-            style={[s.modalSaveBtn, { backgroundColor: createMut.isPending ? C.border : C.primary }]}
-            onPress={() => createMut.mutate()}
-            disabled={createMut.isPending}
-          >
-            {createMut.isPending ? <ActivityIndicator color="#fff" /> : <Text style={s.modalSaveBtnTxt}>Do'kon yaratish</Text>}
+          <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: createMut.isPending ? C.border : C.primary }]}
+            onPress={() => createMut.mutate()} disabled={createMut.isPending}>
+            {createMut.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Yaratish</Text>}
           </TouchableOpacity>
         </View>
       </MModal>
 
-      <MModal visible={modal === "creds"} title={`🔑 ${selectedShop?.name || ""}`} onClose={() => setModal(null)}>
+      <MModal visible={modal === "topup"} title={`Balans: ${selectedShop?.name}`} onClose={() => setModal(null)}>
         <View style={{ gap: 12 }}>
-          {selectedShop?.owner && (
-            <View style={[s.infoBanner, { backgroundColor: C.surface }]}>
-              <Text style={[s.infoBannerTxt, { color: C.text }]}>Joriy admin: <Text style={{ fontFamily: "Inter_700Bold", color: C.primary }}>{selectedShop.owner.username}</Text></Text>
-              <Text style={[s.infoBannerTxt, { color: C.textSecondary, fontSize: 11 }]}>Bo'sh qoldirilsa o'zgarmaydi</Text>
-            </View>
-          )}
-          <MField label="Yangi login" value={credsForm.username} onChange={v => setCredsForm(f => ({ ...f, username: v }))} placeholder="Yangi login" />
+          <Text style={[s.mLbl, { color: C.textSecondary }]}>Joriy balans: <Text style={{ color: "#10B981" }}>{fmt(selectedShop?.balance ?? 0)}</Text></Text>
+          <MField label="Miqdor (so'm)" value={topupAmount} onChange={setTopupAmount} placeholder="100000" keyboard="numeric" />
+          <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: topupMut.isPending ? C.border : "#10B981" }]}
+            onPress={() => topupMut.mutate()} disabled={topupMut.isPending}>
+            {topupMut.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>To'ldirish</Text>}
+          </TouchableOpacity>
+        </View>
+      </MModal>
+
+      <MModal visible={modal === "creds"} title="Login/Parol o'zgartirish" onClose={() => setModal(null)}>
+        <View style={{ gap: 12 }}>
+          <MField label="Yangi login" value={credsForm.username} onChange={v => setCredsForm(f => ({ ...f, username: v }))} placeholder="username" />
           <MField label="Yangi parol" value={credsForm.password} onChange={v => setCredsForm(f => ({ ...f, password: v }))} placeholder="Yangi parol" secure />
-          <TouchableOpacity
-            style={[s.modalSaveBtn, { backgroundColor: credsMut.isPending ? C.border : C.primary }]}
-            onPress={() => credsMut.mutate()}
-            disabled={credsMut.isPending || (!credsForm.username && !credsForm.password)}
-          >
-            {credsMut.isPending ? <ActivityIndicator color="#fff" /> : <Text style={s.modalSaveBtnTxt}>Saqlash</Text>}
-          </TouchableOpacity>
-        </View>
-      </MModal>
-
-      <MModal visible={modal === "topup"} title={`💰 ${selectedShop?.name || ""}`} onClose={() => setModal(null)}>
-        <View style={{ gap: 12 }}>
-          {selectedShop && (
-            <View style={[s.infoBanner, { backgroundColor: "#ECFDF5" }]}>
-              <Text style={[s.infoBannerTxt, { color: "#059669" }]}>Joriy balans: <Text style={{ fontFamily: "Inter_700Bold" }}>{fmt(selectedShop.balance)}</Text></Text>
-            </View>
-          )}
-          <MField label="To'ldirish miqdori (so'm)" value={topupAmount} onChange={setTopupAmount} keyboard="numeric" placeholder="500000" />
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {[100000, 200000, 500000, 1000000].map(a => (
-              <TouchableOpacity key={a} style={[s.quickAmountBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={() => setTopupAmount(String(a))}>
-                <Text style={[s.quickAmountTxt, { color: C.primary }]}>{a >= 1000000 ? "1M" : `${a / 1000}K`}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity
-            style={[s.modalSaveBtn, { backgroundColor: topupMut.isPending ? C.border : "#10B981" }]}
-            onPress={() => topupMut.mutate()}
-            disabled={topupMut.isPending || !topupAmount}
-          >
-            {topupMut.isPending ? <ActivityIndicator color="#fff" /> : <Text style={s.modalSaveBtnTxt}>To'ldirish</Text>}
+          <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: credsMut.isPending ? C.border : C.primary }]}
+            onPress={() => credsMut.mutate()} disabled={credsMut.isPending}>
+            {credsMut.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Saqlash</Text>}
           </TouchableOpacity>
         </View>
       </MModal>
 
       <MModal visible={modal === "template"} title={editTpl ? "Shablonni tahrirlash" : "Yangi shablon"} onClose={() => setModal(null)}>
         <View style={{ gap: 12 }}>
-          <MField label="Shablon nomi *" value={tplForm.nomi} onChange={v => setTplForm(f => ({ ...f, nomi: v }))} placeholder="Buyurtma tayyor" />
+          <MField label="Nomi *" value={tplForm.nomi} onChange={v => setTplForm(f => ({ ...f, nomi: v }))} placeholder="Xarid tasdiqlandi" />
+          <MField label="Shablon turi" value={tplForm.tur} onChange={v => setTplForm(f => ({ ...f, tur: v }))} placeholder="umumiy / xarid / eslatma" />
           <View>
-            <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Tur</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-                {["umumiy", "buyurtma_tayyor", "eslatma", "qarz", "to'lov"].map(t => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[s.turBtn, { backgroundColor: tplForm.tur === t ? C.primary : C.surface, borderColor: tplForm.tur === t ? C.primary : C.border }]}
-                    onPress={() => setTplForm(f => ({ ...f, tur: t }))}
-                  >
-                    <Text style={[s.turBtnTxt, { color: tplForm.tur === t ? "#fff" : C.textSecondary }]}>{t}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
+            <Text style={[s.mLbl, { color: C.textSecondary }]}>Matn *</Text>
+            <TextInput style={[s.mTextArea, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
+              value={tplForm.matn} onChangeText={v => setTplForm(f => ({ ...f, matn: v }))}
+              placeholder="SMS matni..." placeholderTextColor={C.textSecondary}
+              multiline numberOfLines={4} />
           </View>
-          <View>
-            <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Xabar matni *</Text>
-            <TextInput
-              style={[s.textArea, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
-              value={tplForm.matn}
-              onChangeText={v => setTplForm(f => ({ ...f, matn: v }))}
-              placeholder="Hurmatli mijoz, sizning buyurtmangiz tayyor..."
-              placeholderTextColor={C.textSecondary}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-            <Text style={[s.charCount, { color: C.textSecondary }]}>{tplForm.matn.length} ta belgi</Text>
-          </View>
-          <TouchableOpacity
-            style={[s.modalSaveBtn, { backgroundColor: (tplCreateMut.isPending || tplUpdateMut.isPending) ? C.border : "#7C3AED" }]}
+          <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: C.primary }]}
             onPress={() => editTpl ? tplUpdateMut.mutate() : tplCreateMut.mutate()}
-            disabled={tplCreateMut.isPending || tplUpdateMut.isPending || !tplForm.nomi || !tplForm.matn}
-          >
-            {(tplCreateMut.isPending || tplUpdateMut.isPending) ? <ActivityIndicator color="#fff" /> : <Text style={s.modalSaveBtnTxt}>Saqlash</Text>}
+            disabled={tplCreateMut.isPending || tplUpdateMut.isPending}>
+            <Text style={s.modalSaveBtnTxt}>{editTpl ? "Saqlash" : "Yaratish"}</Text>
+          </TouchableOpacity>
+        </View>
+      </MModal>
+
+      <MModal visible={modal === "server"} title="Yangi server qo'shish" onClose={() => setModal(null)}>
+        <View style={{ gap: 12 }}>
+          <MField label="Server nomi *" value={serverForm.name} onChange={v => setServerForm(f => ({ ...f, name: v }))} placeholder="Asosiy server" />
+          <MField label="Server URL *" value={serverForm.url} onChange={v => setServerForm(f => ({ ...f, url: v }))} placeholder="https://api.example.com" keyboard="url" />
+          <MField label="Tavsif" value={serverForm.description} onChange={v => setServerForm(f => ({ ...f, description: v }))} placeholder="Ixtiyoriy tavsif" />
+          <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: serverCreateMut.isPending ? C.border : C.primary }]}
+            onPress={() => serverCreateMut.mutate()} disabled={serverCreateMut.isPending}>
+            {serverCreateMut.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Qo'shish</Text>}
           </TouchableOpacity>
         </View>
       </MModal>
@@ -546,125 +961,165 @@ export default function SuperAdminScreen() {
 
 function SmsField({ label, value, onChange, placeholder, secure }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; secure?: boolean }) {
   return (
-    <View style={{ gap: 4 }}>
-      <Text style={[s.fieldLbl, { color: C.textSecondary }]}>{label}</Text>
-      <TextInput
-        style={[s.fieldInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface, fontFamily: secure ? undefined : "Inter_400Regular" }]}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={C.textSecondary}
-        secureTextEntry={secure}
-        autoCapitalize="none"
-      />
+    <View style={{ gap: 6 }}>
+      <Text style={[s.mLbl, { color: C.textSecondary }]}>{label}</Text>
+      <TextInput style={[s.mInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
+        value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={C.textSecondary}
+        secureTextEntry={!!secure} autoCapitalize="none" />
     </View>
   );
 }
 
-function MModal({ visible, title, children, onClose }: { visible: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
+function MModal({ visible, title, onClose, children }: any) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={s.modalOverlay}>
-        <View style={[s.modalSheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 16 }]}>
-          <View style={[s.modalHeader, { borderBottomColor: C.border }]}>
+        <View style={[s.modalBox, { backgroundColor: C.card }]}>
+          <View style={s.modalHeader}>
             <Text style={[s.modalTitle, { color: C.text }]}>{title}</Text>
             <TouchableOpacity onPress={onClose}><Feather name="x" size={20} color={C.textSecondary} /></TouchableOpacity>
           </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16 }}>
-            {children}
-          </ScrollView>
+          {children}
         </View>
       </View>
     </Modal>
   );
 }
 
-function MField({ label, value, onChange, placeholder, secure, keyboard }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; secure?: boolean; keyboard?: any }) {
+function MField({ label, value, onChange, placeholder, secure, keyboard }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; secure?: boolean; keyboard?: string }) {
   return (
-    <View style={{ gap: 4 }}>
-      <Text style={[s.fieldLbl, { color: C.textSecondary }]}>{label}</Text>
-      <TextInput
-        style={[s.fieldInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={C.textSecondary}
-        secureTextEntry={secure}
-        keyboardType={keyboard}
-        autoCapitalize="none"
-      />
+    <View style={{ gap: 6 }}>
+      <Text style={[s.mLbl, { color: C.textSecondary }]}>{label}</Text>
+      <TextInput style={[s.mInput, { color: C.text, borderColor: C.border, backgroundColor: C.surface }]}
+        value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={C.textSecondary}
+        secureTextEntry={!!secure} keyboardType={(keyboard || "default") as any} autoCapitalize="none" />
     </View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  noAccessTitle: { fontSize: 18, fontFamily: "Inter_700Bold" },
-  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
+  header: {
+    flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16,
+    paddingBottom: 14, borderBottomWidth: 1,
+  },
   headerIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 18, fontFamily: "Inter_700Bold" },
+  headerTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
   headerSub: { fontSize: 12, fontFamily: "Inter_400Regular" },
   logoutBtn: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  tabs: { flexDirection: "row", borderBottomWidth: 1 },
-  tabBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12 },
-  tabBtnTxt: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  noAccessTitle: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
+  tabsWrap: { borderBottomWidth: 1, maxHeight: 50 },
+  tabs: { flexDirection: "row", paddingHorizontal: 4 },
+  tabBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 14, paddingVertical: 14, marginHorizontal: 2,
+  },
+  tabBtnTxt: { fontSize: 13, fontFamily: "Inter_500Medium" },
   statsRow: { flexDirection: "row", gap: 8 },
-  statCard: { flex: 1, borderRadius: 12, borderWidth: 1, padding: 10, alignItems: "center" },
+  statCard: { flex: 1, borderRadius: 12, padding: 12, alignItems: "center", borderWidth: 1, gap: 4 },
   statVal: { fontSize: 20, fontFamily: "Inter_700Bold" },
-  statLbl: { fontSize: 10, fontFamily: "Inter_400Regular", marginTop: 2 },
-  shopCard: { borderRadius: 16, borderWidth: 1, overflow: "hidden" },
-  shopCardTop: { flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 12 },
-  shopDot: { width: 10, height: 10, borderRadius: 5, marginTop: 4 },
-  shopName: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  shopMeta: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 2 },
-  shopBalance: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  shopActions: { flexDirection: "row", gap: 8, padding: 10, paddingTop: 8, borderTopWidth: 1 },
-  actionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 8, borderRadius: 10 },
-  actionBtnTxt: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
-  card: { borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
-  cardTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  statLbl: { fontSize: 11, fontFamily: "Inter_400Regular", textAlign: "center" },
+  shopCard: { borderRadius: 14, borderWidth: 1, overflow: "hidden" },
+  shopCardTop: { flexDirection: "row", gap: 12, padding: 14, alignItems: "flex-start" },
+  shopDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
+  shopName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  shopMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  shopBalance: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  shopActions: { flexDirection: "row", borderTopWidth: 1, gap: 1 },
+  actionBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 5, paddingVertical: 10,
+  },
+  actionBtnTxt: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  serverCard: { borderRadius: 14, overflow: "hidden" },
+  serverCardTop: { flexDirection: "row", gap: 12, padding: 14, alignItems: "flex-start" },
+  serverIconWrap: { width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  serverName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  serverUrl: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  serverDesc: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  statusDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5 },
+  primaryBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  primaryBadgeTxt: { fontSize: 10, fontFamily: "Inter_700Bold", color: "#fff" },
+  serverStatus: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 8, borderTopWidth: 1 },
+  serverStatusTxt: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  serverLastCheck: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  serverActions: { flexDirection: "row", borderTopWidth: 1, gap: 1 },
+  srvBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 4, paddingVertical: 9,
+  },
+  srvBtnTxt: { fontSize: 11, fontFamily: "Inter_500Medium" },
+  infoBanner: {
+    flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12,
+    borderRadius: 10, borderWidth: 1,
+  },
+  infoBannerTxt: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 18 },
+  card: { borderRadius: 14, borderWidth: 1, padding: 16, gap: 12 },
+  cardTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   providerRow: { flexDirection: "row", gap: 10 },
-  providerBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, borderWidth: 2, paddingVertical: 10 },
-  providerBtnTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  infoBanner: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: 10 },
-  infoBannerTxt: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular" },
-  saveBtn: { paddingVertical: 13, borderRadius: 12, alignItems: "center" },
-  saveBtnTxt: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
+  providerBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1.5 },
+  providerBtnTxt: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  saveBtn: { height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  saveBtnTxt: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   testRow: { flexDirection: "row", gap: 10 },
-  testInput: { flex: 1, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, fontFamily: "Inter_400Regular" },
-  testBtn: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  logRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1 },
+  testInput: { flex: 1, height: 46, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
+  testBtn: { width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  logRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 0.5 },
   logDot: { width: 8, height: 8, borderRadius: 4 },
-  logPhone: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  logMatn: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  logTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  emptyCard: { borderRadius: 16, borderWidth: 1, padding: 30, alignItems: "center", gap: 10 },
-  emptyTxt: { fontSize: 13, fontFamily: "Inter_400Regular" },
-  tplCard: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10 },
-  tplHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-  tplName: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  tplBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, alignSelf: "flex-start", marginTop: 4 },
-  tplBadgeTxt: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  logPhone: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  logMatn: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  logTime: { fontSize: 11 },
+  emptyCard: { borderRadius: 14, borderWidth: 1, padding: 24, alignItems: "center", gap: 10 },
+  emptyTxt: { fontSize: 15, fontFamily: "Inter_500Medium", textAlign: "center" },
+  emptySubTxt: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center" },
+  tplCard: { borderRadius: 12, borderWidth: 1, overflow: "hidden" },
+  tplHeader: { flexDirection: "row", alignItems: "flex-start", padding: 14, gap: 12 },
+  tplName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  tplBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4, alignSelf: "flex-start" },
+  tplBadgeTxt: { fontSize: 11, fontFamily: "Inter_500Medium" },
   tplActionBtn: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  tplBody: { padding: 10, borderRadius: 10 },
-  tplBodyTxt: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 18 },
-  fab: { position: "absolute", right: 20, width: 54, height: 54, borderRadius: 27, alignItems: "center", justifyContent: "center", elevation: 5, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6 },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "90%" },
-  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 16, fontFamily: "Inter_700Bold" },
-  modalSaveBtn: { paddingVertical: 14, borderRadius: 12, alignItems: "center", marginTop: 4 },
-  modalSaveBtnTxt: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
-  fieldLbl: { fontSize: 11, fontFamily: "Inter_500Medium" },
-  fieldInput: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, fontFamily: "Inter_400Regular" },
+  tplBody: { padding: 12 },
+  tplBodyTxt: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 20 },
+  fab: {
+    position: "absolute", right: 20, width: 56, height: 56, borderRadius: 28,
+    alignItems: "center", justifyContent: "center",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8,
+  },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modalBox: { width: "100%", maxWidth: 420, borderRadius: 20, padding: 24, gap: 16 },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  modalTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
+  mLbl: { fontSize: 12, fontFamily: "Inter_500Medium" },
+  mInput: { height: 46, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, fontSize: 14 },
+  mTextArea: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingTop: 10, fontSize: 14, minHeight: 100, textAlignVertical: "top" },
+  modalSaveBtn: { height: 50, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  modalSaveBtnTxt: { color: "#fff", fontSize: 15, fontFamily: "Inter_600SemiBold" },
   divider: { borderTopWidth: 1, marginVertical: 4 },
-  dividerLbl: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.5 },
-  quickAmountBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, borderWidth: 1, alignItems: "center" },
-  quickAmountTxt: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  turBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1.5 },
-  turBtnTxt: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
-  textArea: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, fontFamily: "Inter_400Regular", minHeight: 100 },
-  charCount: { fontSize: 10, textAlign: "right", fontFamily: "Inter_400Regular", marginTop: 2 },
+  dividerLbl: { fontSize: 11, fontFamily: "Inter_500Medium" },
+  wGroupTitle: { fontSize: 13, fontFamily: "Inter_700Bold", marginTop: 8, marginBottom: 6 },
+  wCard: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    borderRadius: 14, borderWidth: 1, padding: 12, marginBottom: 8,
+  },
+  wIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  wName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  wMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  wBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  wToggleBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  dealFilterBtn: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1.5,
+  },
+  dealCard: { borderRadius: 14, borderWidth: 1, overflow: "hidden" },
+  dealCardTop: { flexDirection: "row", alignItems: "flex-start", padding: 12, gap: 10 },
+  dealName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  dealMeta: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  dealBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
+  dealInfoRow: {
+    flexDirection: "row", flexWrap: "wrap", gap: 8,
+    paddingHorizontal: 12, paddingBottom: 12,
+  },
+  dealInfoItem: { alignItems: "flex-start", minWidth: 80 },
+  dealInfoLbl: { fontSize: 10, fontFamily: "Inter_400Regular" },
+  dealInfoVal: { fontSize: 13, fontFamily: "Inter_700Bold" },
 });

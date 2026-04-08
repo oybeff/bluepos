@@ -223,7 +223,7 @@ export default function MijozScreen() {
       const token = await AsyncStorage.getItem("auth_token");
       const domain = process.env.EXPO_PUBLIC_DOMAIN;
       const base = domain?.startsWith("http") ? domain : `https://${domain}`;
-      const r = await fetch(`${base}/api/clients?search=${encodeURIComponent(query)}&limit=6`, {
+      const r = await fetch(`${base}/api/customers?search=${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await r.json() as { clients?: any[] } | any[];

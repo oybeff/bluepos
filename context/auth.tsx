@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 import { setAuthTokenGetter } from "@/lib/api-client";
 
 interface AuthUser {
@@ -8,6 +9,7 @@ interface AuthUser {
   fullName: string;
   role: string;
   branchId: number | null;
+  linkedWorkerId?: number | null;
 }
 
 interface AuthContextType {
@@ -40,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthTokenGetter(() => storedToken);
       }
     } catch {
+      // ignore parse errors
     } finally {
       setIsLoading(false);
     }
@@ -59,6 +62,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setAuthTokenGetter(() => null);
+    if (Platform.OS === "web") {
+      // Web: force full page redirect — most reliable in iframe environments
+      (window as any).location.href = "/login";
+    }
+    // Native: AuthGuard in _layout.tsx detects user=null and redirects
   }
 
   return (
