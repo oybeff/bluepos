@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
+import { router } from "expo-router";
 import { setAuthTokenGetter } from "@/lib/api-client";
 
 interface AuthUser {
@@ -63,10 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setAuthTokenGetter(() => null);
     if (Platform.OS === "web") {
-      // Web: force full page redirect — most reliable in iframe environments
       (window as any).location.href = "/login";
+    } else {
+      router.replace("/login" as any);
     }
-    // Native: AuthGuard in _layout.tsx detects user=null and redirects
   }
 
   return (

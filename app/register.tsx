@@ -73,7 +73,7 @@ export default function RegisterScreen() {
           <View style={st.logoWrap}>
             <Feather name="user-plus" size={40} color="#fff" />
           </View>
-          <Text style={st.appName}>Blupos</Text>
+          <Text style={st.appName}>Bluepos</Text>
           <Text style={st.tagline}>Ro'yxatdan o'tish</Text>
         </View>
 

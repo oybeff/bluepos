@@ -291,7 +291,7 @@ export default function MijozOldigaScreen() {
         (grandTotal > 0 ? `Umumiy narx: ${sum(grandTotal)}\n` : "") +
         (zaklat > 0 ? `Zaklat: ${sum(zaklat)}\n` : "") +
         (qarz > 0 ? `Qolgan qarz: ${sum(qarz)}\n` : "") +
-        `Tayyor sana: ${tayyorKun || "—"}\n— Blupos tizimi`;
+        `Tayyor sana: ${tayyorKun || "—"}\n— Bluepos tizimi`;
       await apiReq("/sms/send", { method: "POST", body: JSON.stringify({ phone: mijozPhone, text }) });
       Alert.alert("SMS yuborildi!", `${mijozPhone} raqamiga SMS yuborildi`);
     } catch { Alert.alert("Xato", "SMS yuborishda xato yuz berdi"); }
@@ -429,7 +429,7 @@ export default function MijozOldigaScreen() {
   </div>
   <div class="sig">
     <div>Chevar imzosi: ________________</div>
-    <div style="margin-top:4px;font-size:8px;color:#cbd5e1">Blupos | ${new Date().toLocaleString("uz-UZ")}</div>
+    <div style="margin-top:4px;font-size:8px;color:#cbd5e1">Bluepos | ${new Date().toLocaleString("uz-UZ")}</div>
   </div>
 </div>
 </body></html>`;
@@ -486,7 +486,7 @@ ${qarz>0?`<div style="display:flex;justify-content:space-between;padding:6px 12p
 </div>`:""}
 ${tayyorKun?`<div class="sec"><div class="stl">Tayyor bo'lish sanasi</div><p style="font-size:14px;font-weight:bold;color:#1e293b">${tayyorKun}</p></div>`:""}
 ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px">${izoh}</p></div>`:""}
-<div class="foot">Blupos tizimi | ${new Date().toLocaleString("uz-UZ")}</div>
+<div class="foot">Bluepos tizimi | ${new Date().toLocaleString("uz-UZ")}</div>
 </body></html>`;
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {

@@ -138,7 +138,7 @@ export default function LoginScreen() {
           <View style={st.logoWrap}>
             <Feather name="layers" size={48} color="#fff" />
           </View>
-          <Text style={st.appName}>Blupos</Text>
+          <Text style={st.appName}>Bluepos</Text>
           <Text style={st.tagline}>Parda do'konlari uchun POS tizimi</Text>
         </View>
 
@@ -196,6 +196,20 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
+          <View style={st.divider}>
+            <View style={[st.dividerLine, { backgroundColor: C.border }]} />
+            <Text style={[st.dividerTxt, { color: C.textSecondary }]}>yoki</Text>
+            <View style={[st.dividerLine, { backgroundColor: C.border }]} />
+          </View>
+
+          <TouchableOpacity
+            style={[st.registerBtn, { borderColor: C.primary, backgroundColor: C.surface }]}
+            onPress={() => router.push("/register")}
+          >
+            <Feather name="user-plus" size={20} color={C.primary} />
+            <Text style={[st.registerBtnTxt, { color: C.primary }]}>Ro'yxatdan o'tish</Text>
+          </TouchableOpacity>
+
           <View style={st.hint}>
             <Feather name="shield" size={13} color={C.textSecondary} />
             <Text style={[st.hintTxt, { color: C.textSecondary }]}>Ma'lumotlaringiz himoyalangan</Text>
@@ -237,6 +251,14 @@ const st = StyleSheet.create({
     gap: 10, height: 52, borderRadius: 14, borderWidth: 1.5,
   },
   bioBtnTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  divider: { flexDirection: "row", alignItems: "center", gap: 12 },
+  dividerLine: { flex: 1, height: 1 },
+  dividerTxt: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  registerBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 10, height: 52, borderRadius: 14, borderWidth: 1.5,
+  },
+  registerBtnTxt: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   hint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   hintTxt: { fontSize: 13, fontFamily: "Inter_400Regular" },
 });

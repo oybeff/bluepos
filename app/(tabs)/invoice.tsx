@@ -121,7 +121,7 @@ export default function InvoiceScreen() {
       lines.push(`Izoh: ${izoh}`);
     }
     lines.push("─".repeat(36));
-    lines.push("Blupos tizimi orqali yaratildi");
+    lines.push("Bluepos tizimi orqali yaratildi");
     return lines.join("\n");
   };
 
@@ -147,7 +147,7 @@ export default function InvoiceScreen() {
   .total { font-size:13px; font-weight:bold; text-align:right; margin-top:6px; }
   .footer { text-align:center; font-size:9px; margin-top:8px; }
 </style></head><body>
-<h2>Blupos</h2>
+<h2>Bluepos</h2>
 <div class="sub">HISOB-FAKTURA</div>
 <hr>
 <div style="display:flex;justify-content:space-between">

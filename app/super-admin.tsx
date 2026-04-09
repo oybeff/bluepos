@@ -67,7 +67,7 @@ export default function SuperAdminScreen() {
   const [topupAmount, setTopupAmount] = useState("");
   const [tplForm, setTplForm] = useState({ nomi: "", matn: "", tur: "umumiy" });
   const [serverForm, setServerForm] = useState({ name: "", url: "", description: "" });
-  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "devsms", eskizToken: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "", devsmFrom: "Blupos" });
+  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "devsms", eskizToken: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "", devsmFrom: "Bluepos" });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [testPhone, setTestPhone] = useState("");
@@ -143,7 +143,7 @@ export default function SuperAdminScreen() {
         eskizFrom: smsSettings.eskizFrom || "4546",
         devsmApiKey: smsSettings.devsmApiKey || "",
         devsmPassword: smsSettings.devsmPassword || "",
-        devsmFrom: (smsSettings as any).devsmFrom || "Blupos",
+        devsmFrom: (smsSettings as any).devsmFrom || "Bluepos",
       });
       setSettingsLoaded(true);
     }
@@ -425,7 +425,7 @@ export default function SuperAdminScreen() {
               </View>
               <SmsField label="DevSMS API kaliti" value={smsSettingsForm.devsmApiKey ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmApiKey: v }))} placeholder="API kalit..." />
               <SmsField label="DevSMS Parol" value={smsSettingsForm.devsmPassword ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmPassword: v }))} placeholder="Parol..." secure />
-              <SmsField label="Yuboruvchi nomi" value={smsSettingsForm.devsmFrom ?? "Blupos"} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmFrom: v }))} placeholder="Blupos" />
+              <SmsField label="Yuboruvchi nomi" value={smsSettingsForm.devsmFrom ?? "Bluepos"} onChange={v => setSmsSettingsForm(f => ({ ...f, devsmFrom: v }))} placeholder="Bluepos" />
             </>
           ) : (
             <>

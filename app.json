@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Blupos",
+    "name": "Bluepos",
     "slug": "blupos",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#4F46E5"
     },
     "ios": {
       "supportsTablet": false,
@@ -31,7 +31,6 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
       },
-      "usesCleartextTraffic": true,
       "package": "com.uzbekpos.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -66,17 +65,31 @@
         {
           "faceIDPermission": "Tez kirish uchun Face ID ishlatiladi"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/59e39059-ffcc-4c39-b679-8402283584d0"
+    },
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "eas": {
-        "projectId": "59e39059-ffcc-4c39-b679-8402283584d0"
-      },
       "router": {
         "origin": "https://blupos.app"
+      },
+      "eas": {
+        "projectId": "59e39059-ffcc-4c39-b679-8402283584d0"
       }
     },
     "owner": "oybeff"

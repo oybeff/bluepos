@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, Alert, Switch, Modal, TextInput, ActivityIndicator,
+  Linking,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useAuth } from "@/context/auth";
+import { apiReq } from "@/lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
 
@@ -47,8 +49,25 @@ export default function ProfileScreen() {
   const [confirmPw, setConfirmPw] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
 
+  // Telegram
+  const [tgConnected, setTgConnected] = useState(false);
+  const [tgLoading, setTgLoading] = useState(true);
+
+  const checkTgStatus = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await apiReq<{ connected: boolean }>(`/auth/telegram-status/${user.id}`);
+      setTgConnected(res.connected);
+    } catch { /* ignore */ }
+    finally { setTgLoading(false); }
+  }, [user?.id]);
+
   // Notifications modal
   const [showNotifModal, setShowNotifModal] = useState(false);
+
+  useEffect(() => {
+    checkTgStatus();
+  }, [checkTgStatus]);
 
   useEffect(() => {
     AsyncStorage.getItem(NOTIF_KEY).then(v => {
@@ -78,6 +97,29 @@ export default function ProfileScreen() {
     Alert.alert("Chiqish", "Tizimdan chiqmoqchimisiz?", [
       { text: "Bekor qilish", style: "cancel" },
       { text: "Chiqish", style: "destructive", onPress: () => logout() },
+    ]);
+  }
+
+  async function linkTelegram() {
+    if (!user?.username) return;
+    const url = `https://t.me/blupos_bot?start=link_${user.username}`;
+    await Linking.openURL(url);
+    // Poll for connection after user opens bot
+    setTimeout(() => checkTgStatus(), 5000);
+    setTimeout(() => checkTgStatus(), 10000);
+    setTimeout(() => checkTgStatus(), 20000);
+  }
+
+  async function unlinkTelegram() {
+    if (!user?.id) return;
+    Alert.alert("Telegram uzish", "Telegram bildirishnomalarini o'chirmoqchimisiz?", [
+      { text: "Bekor qilish", style: "cancel" },
+      { text: "Uzish", style: "destructive", onPress: async () => {
+        try {
+          await apiReq("/auth/unlink-telegram", { method: "POST", body: JSON.stringify({ userId: user.id }) });
+          setTgConnected(false);
+        } catch { Alert.alert("Xato", "Telegram uzib bo'lmadi"); }
+      }},
     ]);
   }
 
@@ -201,7 +243,7 @@ export default function ProfileScreen() {
     {
       icon: "help-circle" as const,
       label: "Yordam",
-      subtitle: "Blupos foydalanish bo'yicha",
+      subtitle: "Bluepos foydalanish bo'yicha",
       onPress: () => Alert.alert("Yordam", "Muammo bo'lsa, admin bilan bog'laning.\n\nBot: @blupos_bot"),
       rightEl: <Feather name="chevron-right" size={18} color={C.textSecondary} />,
     },
@@ -234,6 +276,34 @@ export default function ProfileScreen() {
         <InfoRow icon="at-sign" label="Login" value={user?.username || ""} C={C} />
         <InfoRow icon="briefcase" label="Lavozim" value={ROLE_LABELS[user?.role || ""] || user?.role || ""} C={C} last />
       </View>
+
+      {/* Telegram connection */}
+      {(user?.role === "admin" || user?.role === "super_admin" || user?.role === "branch_owner") && (
+        <View style={[styles.tgCard, { backgroundColor: tgConnected ? "#F0FDF4" : "#EFF6FF", borderColor: tgConnected ? "#86EFAC" : "#BFDBFE" }]}>
+          <Feather name="send" size={18} color={tgConnected ? "#16A34A" : "#3B82F6"} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.tgTitle, { color: tgConnected ? "#15803D" : "#1E40AF" }]}>
+              {tgConnected ? "Telegram ulangan" : "Telegram bildirishnomalar"}
+            </Text>
+            <Text style={[styles.tgDesc, { color: tgConnected ? "#16A34A" : "#3B82F6" }]}>
+              {tgConnected
+                ? "Yangi ro'yxatdan o'tish va buyurtmalar haqida xabar olasiz"
+                : "Ulanib, Telegram orqali bildirishnomalarni oling"}
+            </Text>
+          </View>
+          {tgLoading ? (
+            <ActivityIndicator size="small" color={C.primary} />
+          ) : tgConnected ? (
+            <TouchableOpacity onPress={unlinkTelegram} style={styles.tgUnlinkBtn}>
+              <Text style={styles.tgUnlinkTxt}>Uzish</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={linkTelegram} style={[styles.tgLinkBtn, { backgroundColor: "#3B82F6" }]}>
+              <Text style={styles.tgLinkTxt}>Ulash</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Notification prefs quick summary */}
       <View style={[styles.notifSummary, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
@@ -294,7 +364,7 @@ export default function ProfileScreen() {
 
       {/* App info */}
       <View style={[styles.appInfo, { backgroundColor: C.card, borderColor: C.border }]}>
-        <Text style={[styles.appName, { color: C.text }]}>Blupos</Text>
+        <Text style={[styles.appName, { color: C.text }]}>Bluepos</Text>
         <Text style={[styles.appVersion, { color: C.textSecondary }]}>Versiya 1.0.0 · O'zbekiston uchun</Text>
       </View>
 
@@ -487,4 +557,14 @@ const styles = StyleSheet.create({
   },
   superAdminLabel: { color: "#fff", fontSize: 16, fontFamily: "Inter_700Bold" },
   superAdminSub: { color: "rgba(255,255,255,0.75)", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  tgCard: {
+    marginHorizontal: 20, marginBottom: 12, borderRadius: 14, borderWidth: 1,
+    padding: 14, flexDirection: "row", alignItems: "center", gap: 10,
+  },
+  tgTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  tgDesc: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  tgLinkBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  tgLinkTxt: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  tgUnlinkBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  tgUnlinkTxt: { color: "#EF4444", fontSize: 13, fontFamily: "Inter_500Medium" },
 });

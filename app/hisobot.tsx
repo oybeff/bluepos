@@ -145,7 +145,7 @@ export default function HisobotScreen() {
 </head>
 <body>
   <div class="header">
-    <h1>📊 Blupos Hisoboti</h1>
+    <h1>📊 Bluepos Hisoboti</h1>
     <p>Davr: ${periodLabel} — ${fmtDate(now)}</p>
   </div>
 
@@ -201,7 +201,7 @@ export default function HisobotScreen() {
   </div>` : ""}
 
   <div class="footer">
-    Blupos — Parda do'konlari uchun POS tizimi<br>
+    Bluepos — Parda do'konlari uchun POS tizimi<br>
     Hisobot yaratildi: ${now.toLocaleString("uz-UZ")}
   </div>
 </body>
@@ -229,7 +229,7 @@ export default function HisobotScreen() {
     const d = deals;
     const f = finance;
     const text = [
-      `📊 Blupos Hisoboti — ${periodLabel}`,
+      `📊 Bluepos Hisoboti — ${periodLabel}`,
       `📅 ${fmtDate(new Date())}`,
       ``,
       `💰 Moliya:`,
@@ -244,7 +244,7 @@ export default function HisobotScreen() {
       `  Qarz: ${fmt(d?.qarzJami || 0)}`,
     ].join("\n");
 
-    await Share.share({ message: text, title: `Blupos hisoboti — ${periodLabel}` });
+    await Share.share({ message: text, title: `Bluepos hisoboti — ${periodLabel}` });
   }
 
   return (

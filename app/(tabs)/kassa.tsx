@@ -117,7 +117,7 @@ export default function KassaScreen() {
   .total { font-size:14px; font-weight:bold; }
   .footer { text-align:center; font-size:9px; margin-top:8px; }
 </style></head><body>
-<h2>Blupos</h2>
+<h2>Bluepos</h2>
 <div class="sub">KASSA SMENA XISOBOTI</div>
 <hr>
 <div class="row"><span>Smena #${shift.id}</span><span>${shift.status === "ochiq" ? "OCHIQ" : "YOPIQ"}</span></div>

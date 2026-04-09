@@ -116,7 +116,7 @@ export default function StatistikaScreen() {
             <Text style={st.heroGreeting}>
               {new Date().getHours() < 12 ? "Xayrli tong" : new Date().getHours() < 18 ? "Xayrli kun" : "Xayrli kech"} 👋
             </Text>
-            <Text style={st.heroTitle}>{user?.fullName || "Blupos"}</Text>
+            <Text style={st.heroTitle}>{user?.fullName || "Bluepos"}</Text>
             <Text style={st.heroDate}>{todayStr()}</Text>
           </View>
           <View style={{ gap: 8, alignItems: "center" }}>
