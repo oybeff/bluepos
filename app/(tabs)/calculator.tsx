@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,13 +8,28 @@ import {
   TextInput,
   Switch,
   Platform,
+  Alert,
+  ActivityIndicator,
+  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { apiReq } from "@/lib/api";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system";
 
 type Currency = "uzs" | "usd";
 type TabType = "xona" | "parda" | "dike" | "jalousie" | "karniiz";
+
+interface ResultRow { l: string; v: number; acc?: boolean }
+interface CalcResultData {
+  tur: TabType;
+  totalNarx: number;
+  rows: ResultRow[];
+  details: Record<string, any>;
+}
 
 const TABS: { key: TabType; label: string }[] = [
   { key: "xona", label: "🏠 Xona" },
@@ -31,6 +46,12 @@ function useFmt(currency: Currency, rate: number) {
     }
     return `${new Intl.NumberFormat("uz-UZ").format(Math.round(uzs))} so'm`;
   };
+}
+
+/** If value < 10, treat as meters → convert to cm */
+function normalizeCm(val: string): number {
+  const n = parseFloat(val) || 0;
+  return n > 0 && n < 10 ? n * 100 : n;
 }
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -133,7 +154,7 @@ const rvStyles = StyleSheet.create({
 });
 
 // ─── Parda ─────────────────────────────────────────────────────────────────
-function PardaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
+function PardaForm({ fmt, C, onResult }: { fmt: (v: number) => string; C: any; onResult?: (d: CalcResultData | null) => void }) {
   const [f, setF] = useState({
     windowWidth: "250", windowHeight: "270",
     fabricWidth: "280",
@@ -145,8 +166,8 @@ function PardaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   });
   const s = (k: keyof typeof f) => (v: any) => setF(p => ({ ...p, [k]: v }));
 
-  const wW = parseFloat(f.windowWidth) || 0;
-  const wH = parseFloat(f.windowHeight) || 0;
+  const wW = normalizeCm(f.windowWidth);
+  const wH = normalizeCm(f.windowHeight);
   const fW = parseFloat(f.fabricWidth) || 280;
   const fP = parseFloat(f.fabricPrice) || 0;
   const seam = parseFloat(f.seamAllowance) || 18;
@@ -157,9 +178,7 @@ function PardaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   const rP = parseFloat(f.ringPrice) || 0;
   const instP = parseFloat(f.installPrice) || 0;
 
-  const totalWidth = wW + 8; // 8cm side seams
-  const numWidths = Math.ceil(totalWidth / fW);
-  const runningM = numWidths * (wH + seam) / 100;
+  const runningM = wW / 100;
   const fabricCost = runningM * fP;
   const liningCost = f.hasLining ? runningM * lP : 0;
   const sewingCost = (wW / 100) * sewP;
@@ -178,10 +197,14 @@ function PardaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
     { l: `Foyda (${profit}%)`, v: profitVal, acc: true },
   ];
 
+  useEffect(() => {
+    onResult?.({ tur: "parda", totalNarx: total, rows, details: { ...f, runningM } });
+  }, [total]);
+
   return (
     <View style={{ gap: 12 }}>
       <View style={gs.infoRow}>
-        <View style={gs.infoBadge}><Text style={gs.infoText}>Mato: {numWidths} ta polotno · {runningM.toFixed(2)} m</Text></View>
+        <View style={gs.infoBadge}><Text style={gs.infoText}>Mato: {runningM.toFixed(2)} m</Text></View>
       </View>
       <SHead title="O'lchamlar" C={C} />
       <View style={gs.twoCol}>
@@ -219,7 +242,7 @@ function PardaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
 }
 
 // ─── Dike parda ────────────────────────────────────────────────────────────
-function DikeForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
+function DikeForm({ fmt, C, onResult }: { fmt: (v: number) => string; C: any; onResult?: (d: CalcResultData | null) => void }) {
   const [f, setF] = useState({
     width: "120", height: "200", type: "rolik",
     fabricPrice: "70000", stiffenerPrice: "15000",
@@ -229,14 +252,17 @@ function DikeForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   });
   const s = (k: keyof typeof f) => (v: any) => setF(p => ({ ...p, [k]: v }));
 
-  const wM = (parseFloat(f.width) + 4) / 100;
-  const hM = (parseFloat(f.height) + 10) / 100;
+  const w = normalizeCm(f.width);
+  const h = normalizeCm(f.height);
+  const cLen = normalizeCm(f.chainLength);
+  const wM = (w + 4) / 100;
+  const hM = (h + 10) / 100;
   const sqm = wM * hM;
-  const stiffCnt = Math.ceil(parseFloat(f.height) / 30);
+  const stiffCnt = Math.ceil(h / 30);
   const fabricCost = sqm * (parseFloat(f.fabricPrice) || 0);
-  const stiffCost = stiffCnt * (parseFloat(f.width) / 100) * (parseFloat(f.stiffenerPrice) || 0);
+  const stiffCost = stiffCnt * (w / 100) * (parseFloat(f.stiffenerPrice) || 0);
   const mechCost = parseFloat(f.mechanismPrice) || 0;
-  const chainCost = (parseFloat(f.chainLength) / 100) * (parseFloat(f.chainPrice) || 0);
+  const chainCost = (cLen / 100) * (parseFloat(f.chainPrice) || 0);
   const sewCost = sqm * (parseFloat(f.sewingPrice) || 0);
   const instCost = f.hasInstall ? parseFloat(f.installPrice) || 0 : 0;
   const sub = fabricCost + stiffCost + mechCost + chainCost + sewCost + instCost;
@@ -245,13 +271,17 @@ function DikeForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
 
   const rows = [
     { l: `Mato (${sqm.toFixed(3)} m²)`, v: fabricCost },
-    { l: `Ustun (${stiffCnt}ta × ${(parseFloat(f.width) / 100).toFixed(2)}m)`, v: stiffCost },
+    { l: `Ustun (${stiffCnt}ta × ${(w / 100).toFixed(2)}m)`, v: stiffCost },
     { l: "Mexanizm", v: mechCost },
-    { l: `Zanjir (${(parseFloat(f.chainLength) / 100).toFixed(2)} m)`, v: chainCost },
+    { l: `Zanjir (${(cLen / 100).toFixed(2)} m)`, v: chainCost },
     { l: "Tikuv", v: sewCost },
     ...(f.hasInstall ? [{ l: "O'rnatish", v: instCost }] : []),
     { l: `Foyda (${f.profitPercent}%)`, v: profitVal, acc: true },
   ];
+
+  useEffect(() => {
+    onResult?.({ tur: "dike", totalNarx: total, rows, details: { ...f, sqm, stiffCnt } });
+  }, [total]);
 
   return (
     <View style={{ gap: 12 }}>
@@ -292,7 +322,7 @@ function DikeForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
 }
 
 // ─── Jalousie ─────────────────────────────────────────────────────────────
-function JalousieForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
+function JalousieForm({ fmt, C, onResult }: { fmt: (v: number) => string; C: any; onResult?: (d: CalcResultData | null) => void }) {
   const [f, setF] = useState({
     width: "120", height: "160", type: "gorizontal",
     pricePerSqm: "120000", profitPercent: "20",
@@ -301,9 +331,11 @@ function JalousieForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   });
   const s = (k: keyof typeof f) => (v: any) => setF(p => ({ ...p, [k]: v }));
 
-  const sqm = (parseFloat(f.width) / 100) * (parseFloat(f.height) / 100);
+  const w = normalizeCm(f.width);
+  const h = normalizeCm(f.height);
+  const sqm = (w / 100) * (h / 100);
   const jalCost = sqm * (parseFloat(f.pricePerSqm) || 0);
-  const valCost = f.hasValance ? (parseFloat(f.width) / 100) * (parseFloat(f.valancePrice) || 0) : 0;
+  const valCost = f.hasValance ? (w / 100) * (parseFloat(f.valancePrice) || 0) : 0;
   const instCost = f.hasInstall ? parseFloat(f.installPrice) || 0 : 0;
   const sub = jalCost + valCost + instCost;
   const profitVal = sub * (parseFloat(f.profitPercent) || 0) / 100;
@@ -311,10 +343,14 @@ function JalousieForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
 
   const rows = [
     { l: `Jalousie (${sqm.toFixed(3)} m²)`, v: jalCost },
-    ...(f.hasValance ? [{ l: `Valyans (${(parseFloat(f.width) / 100).toFixed(2)} m)`, v: valCost }] : []),
+    ...(f.hasValance ? [{ l: `Valyans (${(w / 100).toFixed(2)} m)`, v: valCost }] : []),
     ...(f.hasInstall ? [{ l: "O'rnatish", v: instCost }] : []),
     { l: `Foyda (${f.profitPercent}%)`, v: profitVal, acc: true },
   ];
+
+  useEffect(() => {
+    onResult?.({ tur: "jalousie", totalNarx: total, rows, details: { ...f, sqm } });
+  }, [total]);
 
   return (
     <View style={{ gap: 12 }}>
@@ -346,7 +382,7 @@ function JalousieForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
 }
 
 // ─── Karniiz ─────────────────────────────────────────────────────────────
-function KarniizForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
+function KarniizForm({ fmt, C, onResult }: { fmt: (v: number) => string; C: any; onResult?: (d: CalcResultData | null) => void }) {
   const [f, setF] = useState({
     length: "250", type: "plastic_2",
     pricePerM: "35000", profitPercent: "20",
@@ -356,7 +392,7 @@ function KarniizForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   });
   const s = (k: keyof typeof f) => (v: any) => setF(p => ({ ...p, [k]: v }));
 
-  const lenM = parseFloat(f.length) / 100;
+  const lenM = normalizeCm(f.length) / 100;
   const cornCost = lenM * (parseFloat(f.pricePerM) || 0);
   const finCost = f.hasFinials ? parseFloat(f.finialsPrice) || 0 : 0;
   const brCost = f.hasBrackets ? (parseFloat(f.bracketsCount) || 0) * (parseFloat(f.bracketPrice) || 0) : 0;
@@ -372,6 +408,10 @@ function KarniizForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
     ...(f.hasInstall ? [{ l: "O'rnatish", v: instCost }] : []),
     { l: `Foyda (${f.profitPercent}%)`, v: profitVal, acc: true },
   ];
+
+  useEffect(() => {
+    onResult?.({ tur: "karniiz", totalNarx: total, rows, details: { ...f, lenM } });
+  }, [total]);
 
   return (
     <View style={{ gap: 12 }}>
@@ -429,7 +469,7 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function XonaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
+function XonaForm({ fmt, C, onResult }: { fmt: (v: number) => string; C: any; onResult?: (d: CalcResultData | null) => void }) {
   const [rooms, setRooms] = useState<Room[]>([
     { id: uid(), name: "Mehmonxona", items: [{ id: uid(), type: "deraza", label: "Deraza 1", width: "150", height: "160" }] },
   ]);
@@ -482,8 +522,8 @@ function XonaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   const calcItems: CalcItem[] = [];
   rooms.forEach(rm => {
     rm.items.forEach(it => {
-      const wW = parseFloat(it.width) || 0;
-      const wH = parseFloat(it.height) || 0;
+      const wW = normalizeCm(it.width);
+      const wH = normalizeCm(it.height);
       const totalWidth = wW + 8;
       const numWidths = Math.ceil(totalWidth / fW);
       const runningM = numWidths * (wH + 18) / 100;
@@ -498,6 +538,12 @@ function XonaForm({ fmt, C }: { fmt: (v: number) => string; C: any }) {
   const profitVal = totalSub * profit / 100;
   const grandTotal = totalSub + profitVal;
   const totalFabric = calcItems.reduce((s, i) => s + i.runningM, 0);
+
+  useEffect(() => {
+    const xonaRows = calcItems.map(ci => ({ l: `${ci.room} - ${ci.label} (${ci.runningM.toFixed(2)}m)`, v: ci.sub }));
+    xonaRows.push({ l: `Foyda (${profitPct}%)`, v: profitVal, acc: true } as any);
+    onResult?.({ tur: "xona", totalNarx: grandTotal, rows: xonaRows, details: { rooms, fabricPrice, sewingPrice, profitPct, totalFabric } });
+  }, [grandTotal]);
 
   return (
     <View style={{ gap: 14 }}>
@@ -708,6 +754,360 @@ const gs = StyleSheet.create({
   infoText: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#1D4ED8" },
 });
 
+// ─── Helper: generate PDF HTML ──────────────────────────────────────────────
+function buildPdfHtml(result: CalcResultData, fmtFn: (v: number) => string, mijoz: string, phone: string): string {
+  const turLabels: Record<string, string> = { xona: "Xona (Parda)", parda: "Parda", dike: "Dike/Rolik", jalousie: "Jalousie", karniiz: "Karniiz" };
+  const rows = result.rows.map(r => `<tr><td>${r.l}</td><td style="text-align:right">${fmtFn(r.v)}</td></tr>`).join("");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <style>body{font-family:Arial,sans-serif;padding:24px;color:#1e293b}h1{font-size:22px;margin-bottom:4px}
+  .sub{color:#64748b;font-size:13px;margin-bottom:20px}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th{background:#1d4ed8;color:#fff;padding:8px 12px;text-align:left;font-size:13px}
+  td{padding:8px 12px;border-bottom:1px solid #e2e8f0;font-size:13px}
+  tr:last-child td{border-bottom:none}
+  .total{font-size:18px;font-weight:bold;color:#1d4ed8;margin-top:16px;text-align:right}
+  .logo{color:#1d4ed8;font-weight:bold;font-size:16px;float:right}
+  </style></head><body>
+  <div class="logo">BluePOS</div>
+  <h1>${turLabels[result.tur] ?? result.tur} — Hisob-kitob</h1>
+  <div class="sub">${mijoz ? `Mijoz: ${mijoz}` : ""}${phone ? ` | Tel: ${phone}` : ""} | ${new Date().toLocaleDateString("uz-UZ")}</div>
+  <table><thead><tr><th>Nomi</th><th style="text-align:right">Narxi</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="total">Jami: ${fmtFn(result.totalNarx)}</div>
+  </body></html>`;
+}
+
+// ─── Helper: generate CSV ────────────────────────────────────────────────────
+function buildCsv(result: CalcResultData, fmtFn: (v: number) => string, mijoz: string, phone: string): string {
+  const turLabels: Record<string, string> = { xona: "Xona (Parda)", parda: "Parda", dike: "Dike/Rolik", jalousie: "Jalousie", karniiz: "Karniiz" };
+  const header = `BluePOS - ${turLabels[result.tur] ?? result.tur} Hisob-kitob\n`;
+  const info = `Mijoz:,${mijoz || ""}\nTelefon:,${phone || ""}\nSana:,${new Date().toLocaleDateString("uz-UZ")}\n\n`;
+  const tableHeader = "Nomi,Narxi\n";
+  const tableRows = result.rows.map(r => `"${r.l}","${fmtFn(r.v)}"`).join("\n");
+  const footer = `\n"JAMI NARX:","${fmtFn(result.totalNarx)}"`;
+  return header + info + tableHeader + tableRows + footer;
+}
+
+// ─── Mijoz Modal ─────────────────────────────────────────────────────────────
+interface MijozModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: (ism: string, phone: string, izoh: string) => void;
+  title: string;
+  loading?: boolean;
+  C: any;
+}
+function MijozModal({ visible, onClose, onConfirm, title, loading, C }: MijozModalProps) {
+  const [ism, setIsm] = useState("");
+  const [phone, setPhone] = useState("");
+  const [izoh, setIzoh] = useState("");
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" }}>
+        <View style={{ backgroundColor: C.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 14 }}>
+          <Text style={{ fontSize: 18, fontFamily: "Inter_700Bold", color: C.text }}>{title}</Text>
+          <View style={{ gap: 5 }}>
+            <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Mijoz ismi (ixtiyoriy)</Text>
+            <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface }}
+              value={ism} onChangeText={setIsm} placeholder="Masalan: Aziz Karimov" placeholderTextColor={C.textSecondary} />
+          </View>
+          <View style={{ gap: 5 }}>
+            <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Telefon raqami (ixtiyoriy)</Text>
+            <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface }}
+              value={phone} onChangeText={setPhone} placeholder="+998 90 123 45 67" placeholderTextColor={C.textSecondary} keyboardType="phone-pad" />
+          </View>
+          <View style={{ gap: 5 }}>
+            <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Izoh (ixtiyoriy)</Text>
+            <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface, height: 70 }}
+              value={izoh} onChangeText={setIzoh} placeholder="Qo'shimcha ma'lumot..." placeholderTextColor={C.textSecondary} multiline />
+          </View>
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+            <TouchableOpacity onPress={onClose} style={{ flex: 1, padding: 14, borderRadius: 14, backgroundColor: C.surface, alignItems: "center" }}>
+              <Text style={{ fontFamily: "Inter_600SemiBold", color: C.textSecondary }}>Bekor qilish</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onConfirm(ism, phone, izoh)}
+              style={{ flex: 2, padding: 14, borderRadius: 14, backgroundColor: C.primary, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : null}
+              <Text style={{ fontFamily: "Inter_700Bold", color: "#fff", fontSize: 15 }}>Tasdiqlash</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Sotish Modal (kengaytirilgan) ────────────────────────────────────────────
+interface SotishModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: (data: { ism: string; phone: string; zaklat: string; qaytarish: string; izoh: string }) => void;
+  totalNarx: number;
+  title: string;
+  loading?: boolean;
+  C: any;
+  fmtFn: (v: number) => string;
+}
+function SotishModal({ visible, onClose, onConfirm, totalNarx, title, loading, C, fmtFn }: SotishModalProps) {
+  const [ism, setIsm] = useState("");
+  const [phone, setPhone] = useState("");
+  const [zaklat, setZaklat] = useState("");
+  const [qaytarish, setQaytarish] = useState("");
+  const [izoh, setIzoh] = useState("");
+
+  const zaklatVal = parseFloat(zaklat.replace(/\s/g, "").replace(",", ".")) || 0;
+  const qarz = Math.max(0, totalNarx - zaklatVal);
+
+  function reset() { setIsm(""); setPhone(""); setZaklat(""); setQaytarish(""); setIzoh(""); }
+  function handleClose() { reset(); onClose(); }
+  function handleConfirm() {
+    onConfirm({ ism, phone, zaklat, qaytarish, izoh });
+    reset();
+  }
+
+  const fmtN = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+        <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: "90%" }}>
+          <View style={{ backgroundColor: C.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, gap: 14 }}>
+            <Text style={{ fontSize: 18, fontFamily: "Inter_700Bold", color: C.text }}>{title}</Text>
+
+            {/* Jami narx */}
+            <View style={{ backgroundColor: C.primary + "12", borderRadius: 14, padding: 14, alignItems: "center" }}>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: C.textSecondary }}>Jami narx</Text>
+              <Text style={{ fontSize: 22, fontFamily: "Inter_700Bold", color: C.primary }}>{fmtFn(totalNarx)}</Text>
+            </View>
+
+            {/* Mijoz ismi */}
+            <View style={{ gap: 5 }}>
+              <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Mijoz ismi</Text>
+              <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface }}
+                value={ism} onChangeText={setIsm} placeholder="Aziz Karimov" placeholderTextColor={C.textSecondary} />
+            </View>
+
+            {/* Telefon */}
+            <View style={{ gap: 5 }}>
+              <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Telefon raqami</Text>
+              <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface }}
+                value={phone} onChangeText={setPhone} placeholder="+998 90 123 45 67" placeholderTextColor={C.textSecondary} keyboardType="phone-pad" />
+            </View>
+
+            {/* Zaklat (bergan pul) */}
+            <View style={{ gap: 5 }}>
+              <Text style={{ fontSize: 12, color: "#16A34A", fontFamily: "Inter_600SemiBold" }}>Zaklat (bergan pul) so'm</Text>
+              <TextInput style={{ borderWidth: 1.5, borderColor: "#16A34A", borderRadius: 12, padding: 12, fontSize: 15, color: C.text, backgroundColor: "#F0FDF4", fontFamily: "Inter_600SemiBold" }}
+                value={zaklat} onChangeText={setZaklat} placeholder="0" placeholderTextColor="#86EFAC" keyboardType="numeric" />
+            </View>
+
+            {/* Qolgan qarz (hisoblangan) */}
+            {qarz > 0 ? (
+              <View style={{ backgroundColor: "#FEF2F2", borderRadius: 12, padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: "#DC2626" }}>Qolgan qarz:</Text>
+                <Text style={{ fontSize: 16, fontFamily: "Inter_700Bold", color: "#DC2626" }}>{fmtN(qarz)} so'm</Text>
+              </View>
+            ) : zaklatVal > 0 ? (
+              <View style={{ backgroundColor: "#F0FDF4", borderRadius: 12, padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: "#16A34A" }}>To'liq to'landi</Text>
+                <Feather name="check-circle" size={18} color="#16A34A" />
+              </View>
+            ) : null}
+
+            {/* Qarz qaytarish kuni */}
+            {qarz > 0 ? (
+              <View style={{ gap: 5 }}>
+                <Text style={{ fontSize: 12, color: "#DC2626", fontFamily: "Inter_600SemiBold" }}>Qarz qaytarish kuni (YYYY-MM-DD)</Text>
+                <TextInput style={{ borderWidth: 1.5, borderColor: "#EF4444", borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: "#FFF5F5" }}
+                  value={qaytarish} onChangeText={setQaytarish} placeholder="2026-05-01" placeholderTextColor="#FCA5A5" />
+              </View>
+            ) : null}
+
+            {/* Izoh */}
+            <View style={{ gap: 5 }}>
+              <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>Izoh (ixtiyoriy)</Text>
+              <TextInput style={{ borderWidth: 1.5, borderColor: C.border, borderRadius: 12, padding: 12, fontSize: 14, color: C.text, backgroundColor: C.surface, height: 60 }}
+                value={izoh} onChangeText={setIzoh} placeholder="Qo'shimcha ma'lumot..." placeholderTextColor={C.textSecondary} multiline />
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 4, marginBottom: 8 }}>
+              <TouchableOpacity onPress={handleClose} style={{ flex: 1, padding: 14, borderRadius: 14, backgroundColor: C.surface, alignItems: "center" }}>
+                <Text style={{ fontFamily: "Inter_600SemiBold", color: C.textSecondary }}>Bekor</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleConfirm}
+                style={{ flex: 2, padding: 14, borderRadius: 14, backgroundColor: C.primary, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+                {loading ? <ActivityIndicator color="#fff" size="small" /> : null}
+                <Text style={{ fontFamily: "Inter_700Bold", color: "#fff", fontSize: 15 }}>Sotuvni boshlash</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Action Bar ──────────────────────────────────────────────────────────────
+function ActionBar({ result, fmt, C }: { result: CalcResultData | null; fmt: (v: number) => string; C: any }) {
+  const [saving, setSaving] = useState(false);
+  const [showSave, setShowSave] = useState(false);
+  const [showSotish, setShowSotish] = useState(false);
+
+  if (!result || result.totalNarx <= 0) return null;
+
+  const handlePdf = async (mijoz = "", phone = "") => {
+    try {
+      const html = buildPdfHtml(result, fmt, mijoz, phone);
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Hisob-kitob PDF" });
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    }
+  };
+
+  const handleExcel = async () => {
+    try {
+      const csv = buildCsv(result, fmt, "", "");
+      const fileName = `hisob_${Date.now()}.csv`;
+      if (Platform.OS === "web") {
+        const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = fileName; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const FS = FileSystem as any;
+        const path = (FS.cacheDirectory ?? FS.documentDirectory ?? "") + fileName;
+        await FS.writeAsStringAsync(path, "\uFEFF" + csv, { encoding: "utf8" });
+        await Sharing.shareAsync(path, { mimeType: "text/csv", dialogTitle: "Excel (CSV)" });
+      }
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    }
+  };
+
+  const handleSave = async (ism: string, phone: string, izoh: string) => {
+    setSaving(true);
+    try {
+      await apiReq("/hisob-kitob", {
+        method: "POST",
+        body: JSON.stringify({ tur: result.tur, mijozIsm: ism || null, mijozPhone: phone || null, details: result.rows, totalNarx: result.totalNarx, izoh: izoh || null }),
+      });
+      setShowSave(false);
+      Alert.alert("✅ Saqlandi", "Hisob-kitob muvaffaqiyatli saqlandi!");
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    } finally { setSaving(false); }
+  };
+
+  const handleSotish = async (data: { ism: string; phone: string; zaklat: string; qaytarish: string; izoh: string }) => {
+    const { ism, phone, zaklat: zaklatStr, qaytarish, izoh } = data;
+    const zaklatVal = parseFloat(zaklatStr.replace(/\s/g, "").replace(",", ".")) || 0;
+    const qarzVal = Math.max(0, result.totalNarx - zaklatVal);
+
+    setSaving(true);
+    try {
+      const turLabel: Record<string, string> = { xona: "Xona parda", parda: "Parda", dike: "Dike", jalousie: "Jalousie", karniiz: "Karniiz" };
+      const tavsif = `${turLabel[result.tur] ?? result.tur} sotuvi${ism ? ` — ${ism}` : ""}`;
+
+      // ─── Hisob-kitob saqlash ──────────────────────────────────
+      const saved: any = await apiReq("/hisob-kitob", {
+        method: "POST",
+        body: JSON.stringify({ tur: result.tur, mijozIsm: ism || null, mijozPhone: phone || null, details: result.rows, totalNarx: result.totalNarx, izoh: izoh || null }),
+      });
+
+      // ─── Client deal saqlash (zaklat, qarz, qaytarish kuni) ────
+      await apiReq("/client-deals", {
+        method: "POST",
+        body: JSON.stringify({
+          mijozIsm: ism || null,
+          mijozPhone: phone || null,
+          totalNarx: result.totalNarx,
+          naqdTolov: zaklatVal,
+          zaklatSumma: zaklatVal,
+          qarzSumma: qarzVal,
+          qaytarishMuddati: qaytarish || null,
+          izoh: izoh || null,
+        }),
+      }).catch(() => {});
+
+      // ─── Finance kirim (to'liq savdo summasi) ────────────────
+      await apiReq("/finance/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "income",
+          amount: result.totalNarx,
+          description: tavsif + (qarzVal > 0 ? ` (zaklat: ${fmt(zaklatVal)}, qarz: ${fmt(qarzVal)})` : ""),
+          category: "savdo",
+        }),
+      }).catch(() => {});
+
+      // ─── Kassa kirim (faqat naqd zaklat, smena ochiq bo'lsa) ─
+      const shift: any = await apiReq("/kassa/shifts/current").catch(() => null);
+      if (shift?.id && zaklatVal > 0) {
+        await apiReq("/kassa/transactions", {
+          method: "POST",
+          body: JSON.stringify({ shiftId: shift.id, tur: "kirim", tolov: "naqd", summa: zaklatVal, tavsif, kategoriya: "savdo", hisobKitobId: saved?.id }),
+        }).catch(() => {});
+      }
+
+      setShowSotish(false);
+      const parts = [
+        `Zaklat: ${fmt(zaklatVal)}`,
+        qarzVal > 0 ? `Qarz: ${fmt(qarzVal)}` : "To'liq to'landi",
+        qaytarish ? `Qaytarish: ${qaytarish}` : "",
+      ].filter(Boolean);
+      Alert.alert("✅ Sotuv boshlandi", parts.join("\n"));
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      <View style={abSt.bar}>
+        <View style={abSt.totalWrap}>
+          <Text style={abSt.totalLabel}>Jami narx</Text>
+          <Text style={abSt.totalVal}>{fmt(result.totalNarx)}</Text>
+        </View>
+        <View style={abSt.btns}>
+          <TouchableOpacity style={abSt.iconBtn} onPress={() => handlePdf()}>
+            <Feather name="file-text" size={18} color={C.primary} />
+            <Text style={[abSt.iconBtnTxt, { color: C.primary }]}>PDF</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={abSt.iconBtn} onPress={handleExcel}>
+            <Feather name="grid" size={18} color="#16A34A" />
+            <Text style={[abSt.iconBtnTxt, { color: "#16A34A" }]}>Excel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={abSt.iconBtn} onPress={() => setShowSave(true)}>
+            <Feather name="save" size={18} color="#D97706" />
+            <Text style={[abSt.iconBtnTxt, { color: "#D97706" }]}>Saqlash</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[abSt.sellBtn, { backgroundColor: C.primary }]} onPress={() => setShowSotish(true)}>
+            <Feather name="shopping-cart" size={16} color="#fff" />
+            <Text style={abSt.sellBtnTxt}>Sotuvni boshlash</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <MijozModal visible={showSave} onClose={() => setShowSave(false)} onConfirm={handleSave} title="💾 Saqlash" loading={saving} C={C} />
+      <SotishModal visible={showSotish} onClose={() => setShowSotish(false)} onConfirm={handleSotish}
+        totalNarx={result.totalNarx} title="🛒 Sotuvni boshlash" loading={saving} C={C} fmtFn={fmt} />
+    </>
+  );
+}
+
+const abSt = StyleSheet.create({
+  bar: { marginTop: 16, padding: 16, borderRadius: 20, backgroundColor: "#fff", borderWidth: 1.5, borderColor: "#E2E8F0", gap: 12, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  totalWrap: { alignItems: "center", gap: 2 },
+  totalLabel: { fontSize: 12, fontFamily: "Inter_500Medium", color: "#64748B" },
+  totalVal: { fontSize: 24, fontFamily: "Inter_700Bold", color: "#1D4ED8" },
+  btns: { flexDirection: "row", gap: 8, flexWrap: "wrap", justifyContent: "center" },
+  iconBtn: { alignItems: "center", gap: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: "#E2E8F0", backgroundColor: "#F8FAFC" },
+  iconBtnTxt: { fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  sellBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 12, borderRadius: 14 },
+  sellBtnTxt: { fontSize: 14, fontFamily: "Inter_700Bold", color: "#fff" },
+});
+
 // ─── Main ─────────────────────────────────────────────────────────────────
 export default function CalculatorScreen() {
   const insets = useSafeAreaInsets();
@@ -715,10 +1115,15 @@ export default function CalculatorScreen() {
   const [activeTab, setActiveTab] = useState<TabType>("xona");
   const [currency, setCurrency] = useState<Currency>("uzs");
   const [rate, setRate] = useState("12700");
+  const [currentResult, setCurrentResult] = useState<CalcResultData | null>(null);
 
   const fmt = useFmt(currency, parseFloat(rate) || 12700);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const botPad = insets.bottom + (Platform.OS === "web" ? 90 : 100);
+
+  const handleResult = useCallback((d: CalcResultData | null) => {
+    setCurrentResult(d);
+  }, []);
 
   return (
     <ScrollView
@@ -762,7 +1167,7 @@ export default function CalculatorScreen() {
           {TABS.map(t => (
             <TouchableOpacity
               key={t.key}
-              onPress={() => setActiveTab(t.key)}
+              onPress={() => { setActiveTab(t.key); setCurrentResult(null); }}
               style={[styles.tab, activeTab === t.key && { backgroundColor: C.primary, borderColor: C.primary }]}
             >
               <Text style={[styles.tabTxt, { color: activeTab === t.key ? "#fff" : C.textSecondary }]}>{t.label}</Text>
@@ -772,11 +1177,14 @@ export default function CalculatorScreen() {
       </ScrollView>
 
       {/* Forms */}
-      {activeTab === "xona" && <XonaForm fmt={fmt} C={C} />}
-      {activeTab === "parda" && <PardaForm fmt={fmt} C={C} />}
-      {activeTab === "dike" && <DikeForm fmt={fmt} C={C} />}
-      {activeTab === "jalousie" && <JalousieForm fmt={fmt} C={C} />}
-      {activeTab === "karniiz" && <KarniizForm fmt={fmt} C={C} />}
+      {activeTab === "xona" && <XonaForm fmt={fmt} C={C} onResult={handleResult} />}
+      {activeTab === "parda" && <PardaForm fmt={fmt} C={C} onResult={handleResult} />}
+      {activeTab === "dike" && <DikeForm fmt={fmt} C={C} onResult={handleResult} />}
+      {activeTab === "jalousie" && <JalousieForm fmt={fmt} C={C} onResult={handleResult} />}
+      {activeTab === "karniiz" && <KarniizForm fmt={fmt} C={C} onResult={handleResult} />}
+
+      {/* Action Bar */}
+      <ActionBar result={currentResult} fmt={fmt} C={C} />
     </ScrollView>
   );
 }
