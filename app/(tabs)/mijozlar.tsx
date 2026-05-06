@@ -17,7 +17,7 @@ interface Customer {
   id: number; fullName: string; phone: string; address: string | null;
   notes: string | null; totalDebt: number; isActive: number; createdAt: string;
 }
-interface SmsTemplate { id: number; nomi: string; matn: string; tur: string; faol: boolean; }
+
 interface ClientDeal {
   id: number; mijozIsm: string | null; mijozPhone: string | null; manzil: string | null;
   totalNarx: number | null; qarzSumma: number | null; zaklatSumma: number | null;
@@ -51,8 +51,6 @@ export default function MijozlarScreen() {
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<"add" | "edit" | "sms" | "deal" | null>(null);
   const [form, setForm] = useState({ fullName: "", phone: "", address: "", notes: "" });
-  const [smsText, setSmsText] = useState("");
-  const [selectedTpl, setSelectedTpl] = useState<number | null>(null);
   const [smsSending, setSmsSending] = useState(false);
 
   const { data: customers = [], isLoading, refetch } = useQuery<Customer[]>({
@@ -60,15 +58,9 @@ export default function MijozlarScreen() {
     queryFn: () => apiReq<Customer[]>("/customers"),
   });
 
-  const { data: templates = [] } = useQuery<SmsTemplate[]>({
-    queryKey: ["sms-templates-list"],
-    queryFn: () => apiReq<SmsTemplate[]>("/sms/templates"),
-  });
-
   const { data: deals = [] } = useQuery<ClientDeal[]>({
     queryKey: ["client-deals-list"],
     queryFn: () => apiReq<ClientDeal[]>("/client-deals"),
-    enabled: view === "list",
   });
 
   const { data: customerDetail } = useQuery<Customer & { deals: ClientDeal[] }>({
@@ -94,13 +86,46 @@ export default function MijozlarScreen() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["customers"] }); setView2("list"); setSelected(null); },
   });
 
+  // Merge customers from deals into the list
+  const mergedCustomers = useMemo(() => {
+    const map = new Map<string, Customer>();
+    // Add registered customers first
+    customers.forEach(c => map.set(c.phone?.trim() || c.fullName, c));
+    // Add clients from deals that aren't already in the customers table
+    deals.forEach(d => {
+      if (!d.mijozIsm) return;
+      const key = d.mijozPhone?.trim() || d.mijozIsm;
+      if (map.has(key)) {
+        // Update debt if deal has debt
+        const existing = map.get(key)!;
+        if (d.status === "active" || d.status === "yangi" || d.status === "tikuvda" || d.status === "tayyor" || d.status === "ornatilmoqda") {
+          existing.totalDebt = (existing.totalDebt || 0) + (d.qarzSumma || 0);
+        }
+      } else {
+        // Create a virtual customer from the deal
+        const debt = (d.status === "active" || d.status === "yangi" || d.status === "tikuvda" || d.status === "tayyor" || d.status === "ornatilmoqda") ? (d.qarzSumma || 0) : 0;
+        map.set(key, {
+          id: -(d.id), // negative ID to distinguish virtual customers
+          fullName: d.mijozIsm,
+          phone: d.mijozPhone || "",
+          address: d.manzil,
+          notes: null,
+          totalDebt: debt,
+          isActive: 1,
+          createdAt: d.createdAt,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [customers, deals]);
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return customers;
+    if (!search.trim()) return mergedCustomers;
     const q = search.toLowerCase();
-    return customers.filter(c =>
+    return mergedCustomers.filter(c =>
       c.fullName.toLowerCase().includes(q) || (c.phone || "").includes(q)
     );
-  }, [customers, search]);
+  }, [mergedCustomers, search]);
 
   const debtAlerts = useMemo(() => {
     return deals.filter(d => {
@@ -111,21 +136,21 @@ export default function MijozlarScreen() {
     }).slice(0, 5);
   }, [deals]);
 
+  const DEBT_SMS_TEXT = "Hurmatli mijoz, sizda parda xaridi bo'yicha qarzdorlik mavjud.\nTo'lovni imkon qadar tezroq amalga oshirishingizni so'raymiz.\nDo'kon: AL AMIN PARDALAR UYI\nTel: +998911741424";
+
   async function sendBulkSms() {
-    const text = smsText.trim();
-    if (!text) { Alert.alert("SMS matni kiriting"); return; }
     setSmsSending(true);
     try {
       const res = await apiReq<any>("/customers/sms-campaign", {
         method: "POST",
-        body: JSON.stringify({ matn: text, templateId: selectedTpl || undefined }),
+        body: JSON.stringify({ matn: DEBT_SMS_TEXT }),
       });
       if (res.warning) {
         Alert.alert("⚠️ SMS sozlanmagan", res.warning);
       } else {
         Alert.alert("✅ SMS yuborildi!", `${res.sent}/${res.total} mijozga SMS yuborildi`);
       }
-      setModal(null); setSmsText(""); setSelectedTpl(null);
+      setModal(null);
     } catch (e: any) { Alert.alert("Xato", e.message); }
     finally { setSmsSending(false); }
   }
@@ -335,22 +360,22 @@ export default function MijozlarScreen() {
       {/* Stats row */}
       <View style={[st.statsRow, { backgroundColor: C.card, borderBottomColor: C.border }]}>
         <View style={st.statItem}>
-          <Text style={[st.statVal, { color: C.primary }]}>{customers.length}</Text>
+          <Text style={[st.statVal, { color: C.primary }]}>{mergedCustomers.length}</Text>
           <Text style={[st.statLbl, { color: C.textSecondary }]}>Jami</Text>
         </View>
         <View style={[st.statDivider, { backgroundColor: C.border }]} />
         <View style={st.statItem}>
           <Text style={[st.statVal, { color: "#DC2626" }]}>
-            {customers.filter(c => (c.totalDebt || 0) > 0).length}
+            {mergedCustomers.filter(c => (c.totalDebt || 0) > 0).length}
           </Text>
           <Text style={[st.statLbl, { color: C.textSecondary }]}>Qarzdor</Text>
         </View>
         <View style={[st.statDivider, { backgroundColor: C.border }]} />
         <View style={st.statItem}>
           <Text style={[st.statVal, { color: "#10B981" }]}>
-            {customers.filter(c => (c.totalDebt || 0) === 0).length}
+            {mergedCustomers.filter(c => (c.totalDebt || 0) === 0).length}
           </Text>
-          <Text style={[st.statLbl, { color: C.textSecondary }]}>Tozа</Text>
+          <Text style={[st.statLbl, { color: C.textSecondary }]}>Toza</Text>
         </View>
       </View>
 
@@ -441,41 +466,24 @@ export default function MijozlarScreen() {
       <Modal visible={modal === "sms"} animationType="slide" transparent>
         <View style={st.overlay}>
           <View style={[st.modalBox, { backgroundColor: C.card }]}>
-            <Text style={[st.modalTitle, { color: C.text }]}>Aksiya SMS yuborish</Text>
-            <Text style={[st.fieldLabel, { color: C.textSecondary }]}>Barcha {customers.length} ta mijozga SMS yuboriladi</Text>
+            <Text style={[st.modalTitle, { color: C.text }]}>Qarz eslatma SMS</Text>
+            <Text style={[st.fieldLabel, { color: C.textSecondary, marginBottom: 4 }]}>
+              Barcha {mergedCustomers.filter(c => (c.totalDebt || 0) > 0).length} ta qarzdor mijozga SMS yuboriladi
+            </Text>
 
-            {templates.filter(t => t.tur === "aksiya").length > 0 && (
-              <View style={{ gap: 4 }}>
-                <Text style={[st.fieldLabel, { color: C.textSecondary }]}>Shablon tanlash</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: "row" }}>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    {templates.filter(t => t.tur === "aksiya").map(t => (
-                      <TouchableOpacity key={t.id} onPress={() => { setSelectedTpl(t.id); setSmsText(t.matn); }}
-                        style={[st.tplChip, { backgroundColor: selectedTpl === t.id ? C.primary : C.surface, borderColor: selectedTpl === t.id ? C.primary : C.border }]}>
-                        <Text style={{ color: selectedTpl === t.id ? "#fff" : C.text, fontSize: 12, fontFamily: "Inter_500Medium" }}>{t.nomi}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              </View>
-            )}
-
-            <View style={{ gap: 4 }}>
-              <Text style={[st.fieldLabel, { color: C.textSecondary }]}>SMS matni ({"{ism}"} - mijoz ism almashadi)</Text>
-              <TextInput
-                style={[st.input, { color: C.text, borderColor: C.border, minHeight: 80, textAlignVertical: "top", paddingTop: 10 }]}
-                value={smsText} onChangeText={t => { setSmsText(t); setSelectedTpl(null); }}
-                placeholder="SMS matnini kiriting..." placeholderTextColor={C.textSecondary}
-                multiline numberOfLines={4} />
+            <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: C.border }}>
+              <Text style={{ color: C.text, fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 20 }}>
+                {DEBT_SMS_TEXT}
+              </Text>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-              <TouchableOpacity onPress={() => { setModal(null); setSmsText(""); setSelectedTpl(null); }}
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+              <TouchableOpacity onPress={() => setModal(null)}
                 style={[st.btn, { backgroundColor: C.border, flex: 1 }]}>
                 <Text style={{ color: C.text, fontFamily: "Inter_600SemiBold" }}>Bekor</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={sendBulkSms} disabled={smsSending || !smsText.trim()}
-                style={[st.btn, { backgroundColor: "#059669", flex: 2, opacity: !smsText.trim() ? 0.5 : 1 }]}>
+              <TouchableOpacity onPress={sendBulkSms} disabled={smsSending}
+                style={[st.btn, { backgroundColor: "#059669", flex: 2, opacity: smsSending ? 0.5 : 1 }]}>
                 {smsSending ? <ActivityIndicator color="#fff" size="small" /> : (
                   <>
                     <Feather name="send" size={15} color="#fff" />

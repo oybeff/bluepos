@@ -15,7 +15,7 @@ const C = Colors.light;
 
 type Period = "today" | "week" | "month" | "year";
 type KassaPeriod = "today" | "week" | "month";
-type Tab = "umumiy" | "mijoz" | "kassa";
+type Tab = "umumiy" | "mijoz" | "kassa" | "kirim-chiqim";
 
 const PERIODS: { key: Period; label: string }[] = [
   { key: "today", label: "Bugun" },
@@ -26,6 +26,10 @@ const PERIODS: { key: Period; label: string }[] = [
 const PERIOD_UZ: Record<Period, string> = {
   today: "Bugun", week: "Bu hafta", month: "Bu oy", year: "Bu yil",
 };
+const MONTHS_UZ = [
+  "Yanvar","Fevral","Mart","Aprel","May","Iyun",
+  "Iyul","Avgust","Sentabr","Oktabr","Noyabr","Dekabr",
+];
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Faol", yangi: "Yangi", tikuvda: "Tikuvda", tayyor: "Tayyor",
@@ -42,13 +46,6 @@ function mln(v: number) {
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + " mln";
   if (v >= 1000) return (v / 1000).toFixed(0) + " ming";
   return v.toString();
-}
-function ago(d: string) {
-  const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-  if (m < 60) return `${m} daq oldin`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} soat oldin`;
-  return `${Math.floor(h / 24)} kun oldin`;
 }
 
 function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -74,7 +71,226 @@ function StatRow({ label, value, color, icon }: { label: string; value: string; 
   );
 }
 
-async function shareHtml(html: string, title: string) {
+// ─── HTML builders ───────────────────────────────────────────────────────────
+
+const CSS_BASE = `
+  @page { size: A4; margin: 18mm 20mm; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a2e; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #4f46e5; padding-bottom:10px; margin-bottom:14px; }
+  .brand { font-size:22px; font-weight:900; color:#4f46e5; letter-spacing:2px; }
+  .brand-sub { font-size:10px; color:#64748b; margin-top:2px; }
+  .hdr-right { text-align:right; font-size:11px; color:#475569; }
+  .sec { margin-bottom:14px; }
+  .stl { font-size:10px; font-weight:bold; color:#4f46e5; text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px; border-bottom:2px solid #e2e8f0; padding-bottom:3px; }
+  .row { display:flex; justify-content:space-between; align-items:center; padding:7px 12px; border-bottom:1px dashed #e2e8f0; }
+  .row:last-child { border:none; }
+  .lbl { color:#475569; font-size:12px; }
+  .val { font-weight:700; font-size:12px; }
+  .box { border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; margin-bottom:8px; }
+  .green { color:#10B981; } .red { color:#EF4444; } .blue { color:#3B82F6; } .purple { color:#7C3AED; }
+  .grand { background:#4f46e5; color:white; border-radius:8px; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .grand .lbl { color:rgba(255,255,255,.8); font-size:12px; }
+  .grand .val { font-size:20px; font-weight:900; color:white; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .kpi { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; }
+  .kpi .num { font-size:18px; font-weight:900; color:#1e293b; margin-top:2px; }
+  .kpi .lbl { font-size:9px; color:#94a3b8; text-transform:uppercase; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#4f46e5; color:white; padding:6px 8px; text-align:left; font-size:10px; }
+  td { border:1px solid #e2e8f0; padding:5px 8px; }
+  tr:nth-child(even) td { background:#f8fafc; }
+  .foot { border-top:1px solid #e2e8f0; margin-top:20px; padding-top:8px; text-align:center; color:#94a3b8; font-size:10px; }
+`;
+
+function buildGeneralHtml(gen: any, dash: any, period: Period, dateStr: string) {
+  return `<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8"><style>${CSS_BASE}</style></head><body>
+<div class="hdr">
+  <div><div class="brand">BLUEPOS</div><div class="brand-sub">Parda do'konlari uchun POS tizimi</div></div>
+  <div class="hdr-right">Umumiy hisobot<br><strong>${PERIOD_UZ[period]} · ${dateStr}</strong></div>
+</div>
+<div class="sec">
+  <div class="stl">Savdo ko'rsatkichlari</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Jami buyurtmalar</span><span class="val">${gen?.totalOrders ?? 0} ta</span></div>
+    <div class="row"><span class="lbl">Faol bitishuvlar</span><span class="val blue">${gen?.activeDeals ?? 0} ta</span></div>
+    <div class="row"><span class="lbl">Yopilgan bitishuvlar</span><span class="val green">${gen?.closedDeals ?? 0} ta</span></div>
+    <div class="row"><span class="lbl">Jami mijozlar</span><span class="val">${dash?.totalClients ?? 0} ta</span></div>
+  </div>
+</div>
+<div class="sec">
+  <div class="stl">Moliyaviy ko'rsatkichlar</div>
+  <div class="grand"><span class="lbl">Olingan tovar jami</span><span class="val">${nfull(gen?.totalTovar)}</span></div>
+  <div class="box">
+    <div class="row"><span class="lbl">Jami to'langan (zaklat)</span><span class="val green">${nfull(gen?.totalZaklat)}</span></div>
+    <div class="row"><span class="lbl">Qolgan qarz</span><span class="val red">${nfull(gen?.totalQarz)}</span></div>
+    <div class="row"><span class="lbl">O'rnatish ishlari</span><span class="val">${nfull(gen?.totalOrnatish)}</span></div>
+    <div class="row"><span class="lbl">Chevar haqi</span><span class="val">${nfull(gen?.totalChevar)}</span></div>
+    <div class="row"><span class="lbl">Karniiz/aksessuarlar</span><span class="val">${nfull(gen?.totalKarniiz)}</span></div>
+  </div>
+</div>
+<div class="sec">
+  <div class="stl">Bugungi holat</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Bugungi savdo</span><span class="val">${nfull(dash?.todaySales)}</span></div>
+    <div class="row"><span class="lbl">Bugungi buyurtmalar</span><span class="val">${dash?.todayOrders ?? 0} ta</span></div>
+  </div>
+</div>
+<div class="foot">BluePOS · ${dateStr}</div>
+</body></html>`;
+}
+
+function buildKirimChiqimHtml(data: any, year: number, month: number, dateStr: string) {
+  const monthName = MONTHS_UZ[month - 1] ?? "";
+  const kategoriyaRows = (data?.kategoriyalar ?? []).map((k: any) =>
+    `<tr>
+      <td>${k.kategoriya ?? "boshqa"}</td>
+      <td>${k.tur === "kirim" ? "Kirim" : "Chiqim"}</td>
+      <td style="text-align:right;font-weight:700;color:${k.tur === "kirim" ? "#10B981" : "#EF4444"}">${nfull(k.total)}</td>
+    </tr>`
+  ).join("");
+
+  const dealRowsHtml = (data?.dealRows ?? []).map((d: any) =>
+    `<tr>
+      <td>${d.date ? new Date(d.date).toLocaleDateString("uz-UZ") : "—"}</td>
+      <td style="text-align:right">${nfull(d.savdo)}</td>
+      <td style="text-align:right;color:#10B981">${nfull(d.naqdKirim)}</td>
+      <td style="text-align:right;color:#EF4444">${nfull(d.qarz)}</td>
+    </tr>`
+  ).join("");
+
+  const s = data?.summary ?? {};
+  const d = data?.deals ?? {};
+  const sof = s.sof ?? 0;
+
+  return `<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8"><style>${CSS_BASE}</style></head><body>
+<div class="hdr">
+  <div><div class="brand">BLUEPOS</div><div class="brand-sub">Kirim-Chiqim hisoboti</div></div>
+  <div class="hdr-right">${monthName} ${year}<br><strong>${dateStr}</strong></div>
+</div>
+
+<div class="sec">
+  <div class="stl">Oy xulosasi — ${monthName} ${year}</div>
+  <div class="grand" style="background:${sof >= 0 ? "#059669" : "#dc2626"}">
+    <span class="lbl">SOF FOYDA / ZARAR</span>
+    <span class="val">${sof >= 0 ? "+" : ""}${nfull(sof)}</span>
+  </div>
+  <div class="grid2">
+    <div class="kpi"><div class="lbl">Jami kirim</div><div class="num" style="color:#10B981">${nfull(s.jamiKirim)}</div></div>
+    <div class="kpi"><div class="lbl">Jami chiqim</div><div class="num" style="color:#EF4444">${nfull(s.jamiChiqim)}</div></div>
+    <div class="kpi"><div class="lbl">Naqd kirim</div><div class="num">${nfull(s.naqdKirim)}</div></div>
+    <div class="kpi"><div class="lbl">Plastik kirim</div><div class="num">${nfull(s.plastikKirim)}</div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="stl">Savdo natijalari</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Yangi buyurtmalar</span><span class="val">${d.buyurtmalar ?? 0} ta</span></div>
+    <div class="row"><span class="lbl">Savdo jami</span><span class="val">${nfull(d.savdoJami)}</span></div>
+    <div class="row"><span class="lbl">Naqd to'lov</span><span class="val green">${nfull(d.naqdJami)}</span></div>
+    <div class="row"><span class="lbl">Qarzga berilgan</span><span class="val red">${nfull(d.qarzJami)}</span></div>
+    <div class="row"><span class="lbl">To'lov yig'ish foizi</span>
+      <span class="val">${d.savdoJami > 0 ? ((d.naqdJami / d.savdoJami) * 100).toFixed(1) : 0}%</span></div>
+  </div>
+</div>
+
+${kategoriyaRows ? `<div class="sec">
+  <div class="stl">Kategoriyalar bo'yicha</div>
+  <table><thead><tr><th>Kategoriya</th><th>Turi</th><th style="text-align:right">Summa</th></tr></thead>
+  <tbody>${kategoriyaRows}</tbody></table>
+</div>` : ""}
+
+${dealRowsHtml ? `<div class="sec">
+  <div class="stl">Kunlik savdo</div>
+  <table><thead><tr><th>Sana</th><th style="text-align:right">Savdo</th><th style="text-align:right">Naqd</th><th style="text-align:right">Qarz</th></tr></thead>
+  <tbody>${dealRowsHtml}</tbody></table>
+</div>` : ""}
+
+<div class="foot">BluePOS · ${dateStr} · Smenalar: ${s.smenalar ?? 0} ta</div>
+</body></html>`;
+}
+
+function buildKassaHtml(kassaReport: any, kassaPeriod: KassaPeriod, dateStr: string) {
+  const periodUZ: Record<string, string> = { today: "Bugun", week: "Bu hafta", month: "Bu oy" };
+  return `<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8"><style>${CSS_BASE}</style></head><body>
+<div class="hdr">
+  <div><div class="brand">BLUEPOS</div><div class="brand-sub">Kassa hisoboti</div></div>
+  <div class="hdr-right">${periodUZ[kassaPeriod] ?? kassaPeriod}<br><strong>${dateStr}</strong></div>
+</div>
+<div class="sec">
+  <div class="stl">Kirimlar</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Naqd kirim</span><span class="val green">${nfull(kassaReport.totalNaqd)}</span></div>
+    <div class="row"><span class="lbl">Plastik kirim</span><span class="val blue">${nfull(kassaReport.totalPlastik)}</span></div>
+    <div class="row"><span class="lbl">Jami kirim</span><span class="val">${nfull(kassaReport.netKirim)}</span></div>
+  </div>
+</div>
+<div class="sec">
+  <div class="stl">Chiqimlar va balans</div>
+  <div class="grand"><span class="lbl">Net qoldiq</span><span class="val">${nfull(kassaReport.netQoldiq)}</span></div>
+  <div class="box">
+    <div class="row"><span class="lbl">Jami chiqim</span><span class="val red">${nfull(kassaReport.totalChiqim)}</span></div>
+    <div class="row"><span class="lbl">Smenalar soni</span><span class="val">${kassaReport.shiftsCount} ta</span></div>
+  </div>
+</div>
+<div class="foot">BluePOS · ${dateStr}</div>
+</body></html>`;
+}
+
+function buildCustomerHtml(customer: any, deals: any[], summary: any, dateStr: string) {
+  const dealsRows = deals.map((d: any) => `
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:10px;">
+      <div style="font-size:11px;color:#6b7280;margin-bottom:6px;font-weight:600;">
+        ${d.created_at ? new Date(d.created_at).toLocaleDateString("uz-UZ") : "—"} · ${STATUS_LABELS[d.status] ?? d.status}
+      </div>
+      <div class="row"><span class="lbl">Tovar narxi</span><span class="val">${nfull(parseFloat(d.total_narx ?? d.totalNarx ?? "0"))}</span></div>
+      <div class="row"><span class="lbl">Naqd to'lov</span><span class="val green">${nfull(parseFloat(d.naqd_tolov ?? d.naqdTolov ?? "0"))}</span></div>
+      <div class="row"><span class="lbl">Qarz</span><span class="val red">${nfull(parseFloat(d.qarz_summa ?? d.qarzSumma ?? "0"))}</span></div>
+      ${d.tayyor_bolish_kuni || d.tayyorBolishKuni ? `<div class="row"><span class="lbl">Tayyor sanasi</span><span class="val">${d.tayyor_bolish_kuni ?? d.tayyorBolishKuni}</span></div>` : ""}
+    </div>`
+  ).join("");
+
+  return `<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8"><style>${CSS_BASE}</style></head><body>
+<div class="hdr">
+  <div><div class="brand">BLUEPOS</div><div class="brand-sub">Mijoz hisoboti</div></div>
+  <div class="hdr-right">${dateStr}</div>
+</div>
+<div class="sec">
+  <div class="stl">Mijoz</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Ism</span><span class="val">${customer.fullName ?? customer.mijoz_ism ?? "—"}</span></div>
+    <div class="row"><span class="lbl">Telefon</span><span class="val">${customer.phone ?? customer.mijoz_phone ?? "—"}</span></div>
+    ${customer.address ? `<div class="row"><span class="lbl">Manzil</span><span class="val">${customer.address}</span></div>` : ""}
+  </div>
+</div>
+<div class="sec">
+  <div class="stl">Umumiy ko'rsatkichlar</div>
+  <div class="grand"><span class="lbl">Olingan tovar jami</span><span class="val">${nfull(summary.totalTovar)}</span></div>
+  <div class="box">
+    <div class="row"><span class="lbl">Jami bitishuvlar</span><span class="val">${summary.dealsCount} ta</span></div>
+    <div class="row"><span class="lbl">Jami to'langan</span><span class="val green">${nfull(summary.totalZaklat)}</span></div>
+    <div class="row"><span class="lbl">Qolgan qarz</span><span class="val red">${nfull(summary.totalQarz)}</span></div>
+    <div class="row"><span class="lbl">Faol bitishuvlar</span><span class="val blue">${summary.activeDeals} ta</span></div>
+  </div>
+</div>
+${deals.length > 0 ? `<div class="sec"><div class="stl">Bitishuvlar tarixi</div>${dealsRows}</div>` : ""}
+<div class="foot">BluePOS · ${dateStr}</div>
+</body></html>`;
+}
+
+// ─── Share / Print ─────────────────────────────────────────────────────────────
+
+async function printHtml(html: string) {
+  if (Platform.OS === "web") {
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.print(); }
+    return;
+  }
+  await Print.printAsync({ html });
+}
+
+async function shareAsPdf(html: string, title: string) {
   if (Platform.OS === "web") {
     const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
@@ -84,94 +300,15 @@ async function shareHtml(html: string, title: string) {
     document.body.removeChild(a); URL.revokeObjectURL(url);
     return;
   }
-  const { uri } = await Print.printToFileAsync({ html });
-  const canShare = await Sharing.isAvailableAsync();
-  if (canShare) {
+  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: title });
   } else {
-    Alert.alert("Ulashish mumkin emas", "Qurilmangizda ulashish qo'llab-quvvatlanmaydi");
+    Alert.alert("PDF tayyor", uri);
   }
 }
 
-function buildGeneralHtml(gen: any, dash: any, period: Period, dateStr: string) {
-  return `<!DOCTYPE html>
-<html lang="uz"><head><meta charset="utf-8"><style>
-body{font-family:Arial,sans-serif;padding:24px;color:#111;}
-h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px;}
-.card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px;}
-.title{font-size:13px;color:#6b7280;margin-bottom:12px;font-weight:600;text-transform:uppercase;}
-.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;}
-.row:last-child{border:none;}
-.lbl{color:#6b7280;font-size:14px;}.val{font-weight:700;font-size:15px;color:#111;}
-.green{color:#10B981;}.red{color:#EF4444;}.blue{color:#3B82F6;}
-.footer{margin-top:24px;font-size:12px;color:#9ca3af;text-align:center;}
-</style></head><body>
-<h1>BluePOS Hisobot</h1>
-<h2>${PERIOD_UZ[period]} · ${dateStr}</h2>
-<div class="card">
-  <div class="title">Savdo ko'rsatkichlari</div>
-  <div class="row"><span class="lbl">Jami buyurtmalar</span><span class="val">${gen?.totalOrders ?? 0} ta</span></div>
-  <div class="row"><span class="lbl">Faol bitishuvlar</span><span class="val blue">${gen?.activeDeals ?? 0} ta</span></div>
-  <div class="row"><span class="lbl">Yopilgan bitishuvlar</span><span class="val green">${gen?.closedDeals ?? 0} ta</span></div>
-</div>
-<div class="card">
-  <div class="title">Moliyaviy ko'rsatkichlar</div>
-  <div class="row"><span class="lbl">Olingan tovar (jami)</span><span class="val">${nfull(gen?.totalTovar)}</span></div>
-  <div class="row"><span class="lbl">Oldindan to'lov (zaklat)</span><span class="val green">${nfull(gen?.totalZaklat)}</span></div>
-  <div class="row"><span class="lbl">Qolgan qarz</span><span class="val red">${nfull(gen?.totalQarz)}</span></div>
-  <div class="row"><span class="lbl">O'rnatish ishlari</span><span class="val">${nfull(gen?.totalOrnatish)}</span></div>
-  <div class="row"><span class="lbl">Karniiz/aksessuarlar</span><span class="val">${nfull(gen?.totalKarniiz)}</span></div>
-</div>
-<div class="card">
-  <div class="title">Bugungi holat</div>
-  <div class="row"><span class="lbl">Bugungi savdo</span><span class="val">${nfull(dash?.todaySales)}</span></div>
-  <div class="row"><span class="lbl">Bugungi buyurtmalar</span><span class="val">${dash?.todayOrders ?? 0} ta</span></div>
-  <div class="row"><span class="lbl">Jami mijozlar</span><span class="val">${dash?.totalClients ?? 0} ta</span></div>
-</div>
-<div class="footer">BluePOS · Parda do'konlari uchun POS tizimi</div>
-</body></html>`;
-}
-
-function buildCustomerHtml(customer: any, deals: any[], summary: any, dateStr: string) {
-  const dealsRows = deals.map(d => `
-    <div class="deal">
-      <div class="deal-date">${d.createdAt ? new Date(d.createdAt).toLocaleDateString("uz-UZ") : "—"} · ${STATUS_LABELS[d.status] ?? d.status}</div>
-      <div class="deal-row"><span>Tovar narxi</span><span>${nfull(d.totalNarx)}</span></div>
-      <div class="deal-row"><span>Zaklat</span><span style="color:#10B981">${nfull(d.zaklatSumma)}</span></div>
-      <div class="deal-row ${(d.qarzSumma ?? 0) > 0 ? 'red' : ''}"><span>Qarz</span><span style="color:${(d.qarzSumma ?? 0) > 0 ? '#EF4444' : '#10B981'}">${nfull(d.qarzSumma)}</span></div>
-      ${d.qaytarishMuddati ? `<div class="deal-row"><span>To'lov muddati</span><span>${d.qaytarishMuddati}</span></div>` : ""}
-    </div>
-  `).join("");
-
-  return `<!DOCTYPE html>
-<html lang="uz"><head><meta charset="utf-8"><style>
-body{font-family:Arial,sans-serif;padding:24px;color:#111;}
-h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px;}
-.card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px;}
-.title{font-size:13px;color:#6b7280;font-weight:600;text-transform:uppercase;margin-bottom:12px;}
-.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;}
-.row:last-child{border:none;}.lbl{color:#6b7280;font-size:14px;}.val{font-weight:700;}
-.deal{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px;}
-.deal-date{font-size:12px;color:#6b7280;margin-bottom:8px;font-weight:600;}
-.deal-row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;}
-.summary-val{font-size:18px;font-weight:800;}
-.green{color:#10B981;}.red{color:#EF4444;}
-.footer{margin-top:24px;font-size:12px;color:#9ca3af;text-align:center;}
-</style></head><body>
-<h1>${customer.fullName} — Hisobot</h1>
-<h2>${customer.phone}${customer.address ? " · " + customer.address : ""} · ${dateStr}</h2>
-<div class="card">
-  <div class="title">Umumiy ko'rsatkichlar</div>
-  <div class="row"><span class="lbl">Jami bitishuvlar</span><span class="val">${summary.dealsCount} ta</span></div>
-  <div class="row"><span class="lbl">Olingan tovar jami</span><span class="val summary-val">${nfull(summary.totalTovar)}</span></div>
-  <div class="row"><span class="lbl">Jami to'langan</span><span class="val green">${nfull(summary.totalZaklat)}</span></div>
-  <div class="row"><span class="lbl">Qolgan qarz</span><span class="val red">${nfull(summary.totalQarz)}</span></div>
-  <div class="row"><span class="lbl">Faol bitishuvlar</span><span class="val">${summary.activeDeals} ta</span></div>
-</div>
-${deals.length > 0 ? `<div class="card"><div class="title">Bitishuvlar tarixi</div>${dealsRows}</div>` : ""}
-<div class="footer">BluePOS · Parda do'konlari uchun POS tizimi</div>
-</body></html>`;
-}
+// ─── Main screen ───────────────────────────────────────────────────────────────
 
 export default function HisobotScreen() {
   const insets = useSafeAreaInsets();
@@ -179,13 +316,17 @@ export default function HisobotScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("month");
   const [tab, setTab] = useState<Tab>("umumiy");
-  const [sharing, setSharing] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
-  const [kassaPeriod, setKassaPeriod] = useState<KassaPeriod>("today");
+  const [kassaPeriod, setKassaPeriod] = useState<KassaPeriod>("month");
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
 
-  const topPadding = insets.top + (Platform.OS === "web" ? 67 : 0);
+  const now = new Date();
+  const [kcYear, setKcYear]   = useState(now.getFullYear());
+  const [kcMonth, setKcMonth] = useState(now.getMonth() + 1);
+
+  const topPadding    = insets.top + (Platform.OS === "web" ? 67 : 0);
   const bottomPadding = insets.bottom + (Platform.OS === "web" ? 90 : 100);
 
   const { data: sales, isLoading: salesLoading } = useQuery<any>({
@@ -220,79 +361,73 @@ export default function HisobotScreen() {
     queryFn: () => apiReq(`/kassa/report?period=${kassaPeriod}`),
     retry: false,
   });
+  const { data: kcData, isLoading: kcLoading } = useQuery<any>({
+    queryKey: ["kirim-chiqim", kcYear, kcMonth],
+    queryFn: () => apiReq(`/reports/kirim-chiqim?year=${kcYear}&month=${kcMonth}`),
+    retry: false,
+    enabled: tab === "kirim-chiqim",
+  });
+  const { data: qarzStats } = useQuery<{ olindiJami: number; berildiJami: number; ochiq: number; yopildi: number }>({
+    queryKey: ["qarz-daftar-stats"],
+    queryFn: () => apiReq("/qarz-daftar/stats"),
+    retry: false,
+  });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await qc.invalidateQueries({ queryKey: ["reports-sales", period] });
+    await qc.invalidateQueries({ queryKey: ["reports-sales"] });
     await qc.invalidateQueries({ queryKey: ["reports-dashboard"] });
-    await qc.invalidateQueries({ queryKey: ["reports-general", period] });
-    if (selectedCustomer) await qc.invalidateQueries({ queryKey: ["customer-report", selectedCustomer.id] });
-    await qc.invalidateQueries({ queryKey: ["kassa-report", kassaPeriod] });
+    await qc.invalidateQueries({ queryKey: ["reports-general"] });
+    await qc.invalidateQueries({ queryKey: ["customer-report"] });
+    await qc.invalidateQueries({ queryKey: ["kassa-report"] });
+    await qc.invalidateQueries({ queryKey: ["kirim-chiqim"] });
+    await qc.invalidateQueries({ queryKey: ["qarz-daftar-stats"] });
     setRefreshing(false);
-  }, [qc, period, selectedCustomer, kassaPeriod]);
+  }, [qc]);
 
   const isLoadingMain = salesLoading || dashLoading || genLoading;
-
   const statusEntries = Object.entries(sales?.statusBreakdown ?? {}).sort((a: any, b: any) => b[1] - a[1]);
   const maxStatusCount = (statusEntries[0]?.[1] as number) ?? 1;
   const dailyData = sales?.dailyData ?? [];
   const maxDailySales = Math.max(...dailyData.map((d: any) => d.sales), 1);
   const dateStr = new Date().toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" });
 
-  async function handleShareUmumiy() {
-    setSharing(true);
-    try {
-      const html = buildGeneralHtml(gen, dash, period, dateStr);
-      await shareHtml(html, `BluePOS_Hisobot_${period}`);
-    } catch (e: any) { Alert.alert("Xato", e.message); }
-    finally { setSharing(false); }
+  const getHtmlForTab = () => {
+    if (tab === "umumiy")       return buildGeneralHtml(gen, dash, period, dateStr);
+    if (tab === "kassa")        return kassaReport ? buildKassaHtml(kassaReport, kassaPeriod, dateStr) : null;
+    if (tab === "kirim-chiqim") return kcData ? buildKirimChiqimHtml(kcData, kcYear, kcMonth, dateStr) : null;
+    if (tab === "mijoz")        return custReport ? buildCustomerHtml(custReport.customer, custReport.deals, custReport.summary, dateStr) : null;
+    return null;
+  };
+
+  const getTitleForTab = () => {
+    if (tab === "umumiy")       return `BluePOS_Hisobot_${period}`;
+    if (tab === "kassa")        return `BluePOS_Kassa_${kassaPeriod}`;
+    if (tab === "kirim-chiqim") return `BluePOS_KirimChiqim_${kcYear}_${kcMonth}`;
+    if (tab === "mijoz")        return `BluePOS_Mijoz`;
+    return "BluePOS";
+  };
+
+  async function handlePrint() {
+    const html = getHtmlForTab();
+    if (!html) { Alert.alert("Ma'lumot yo'q", "Avval ma'lumotlarni yuklang"); return; }
+    setPrinting(true);
+    try { await printHtml(html); }
+    catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setPrinting(false); }
   }
 
-  async function handleShareMijoz() {
-    if (!custReport) return;
-    setSharing(true);
-    try {
-      const html = buildCustomerHtml(custReport.customer, custReport.deals, custReport.summary, dateStr);
-      await shareHtml(html, `BluePOS_${custReport.customer.fullName}`);
-    } catch (e: any) { Alert.alert("Xato", e.message); }
-    finally { setSharing(false); }
+  async function handleShare() {
+    const html = getHtmlForTab();
+    if (!html) { Alert.alert("Ma'lumot yo'q", "Avval ma'lumotlarni yuklang"); return; }
+    setPrinting(true);
+    try { await shareAsPdf(html, getTitleForTab()); }
+    catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setPrinting(false); }
   }
 
-  async function handleShareKassa() {
-    if (!kassaReport) return;
-    setSharing(true);
-    try {
-      const periodUZ: Record<string, string> = { today: "Bugun", week: "Bu hafta", month: "Bu oy" };
-      const html = `<!DOCTYPE html><html lang="uz"><head><meta charset="utf-8"><style>
-body{font-family:Arial,sans-serif;padding:24px;color:#111;}
-h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px;}
-.card{border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px;}
-.title{font-size:13px;color:#6b7280;margin-bottom:12px;font-weight:600;text-transform:uppercase;}
-.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;}
-.row:last-child{border:none;}.lbl{color:#6b7280;font-size:14px;}.val{font-weight:700;font-size:15px;}
-.green{color:#10B981;}.red{color:#EF4444;}.blue{color:#3B82F6;}.purple{color:#7C3AED;}
-.footer{margin-top:24px;font-size:12px;color:#9ca3af;text-align:center;}
-</style></head><body>
-<h1>Kassa Hisoboti</h1>
-<h2>${periodUZ[kassaPeriod] ?? kassaPeriod} · ${dateStr}</h2>
-<div class="card">
-<div class="title">Kirimlar</div>
-<div class="row"><span class="lbl">Naqd kirim</span><span class="val green">${nfull(kassaReport.totalNaqd)}</span></div>
-<div class="row"><span class="lbl">Plastik kirim</span><span class="val blue">${nfull(kassaReport.totalPlastik)}</span></div>
-<div class="row"><span class="lbl">Jami kirim</span><span class="val">${nfull(kassaReport.netKirim)}</span></div>
-</div>
-<div class="card">
-<div class="title">Chiqimlar va balans</div>
-<div class="row"><span class="lbl">Jami chiqim</span><span class="val red">${nfull(kassaReport.totalChiqim)}</span></div>
-<div class="row"><span class="lbl">Net qoldiq</span><span class="val purple">${nfull(kassaReport.netQoldiq)}</span></div>
-<div class="row"><span class="lbl">Smenalar soni</span><span class="val">${kassaReport.shiftsCount} ta</span></div>
-</div>
-<div class="footer">BluePOS · Parda do'konlari uchun POS tizimi</div>
-</body></html>`;
-      await shareHtml(html, `BluePOS_Kassa_${kassaPeriod}`);
-    } catch (e: any) { Alert.alert("Xato", e.message); }
-    finally { setSharing(false); }
-  }
+  const kcS = kcData?.summary ?? {};
+  const kcD = kcData?.deals ?? {};
 
   return (
     <View style={[s.root, { backgroundColor: C.background }]}>
@@ -302,93 +437,94 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
           <Text style={s.title}>Hisobot</Text>
           <Text style={[s.subtitle, { color: C.textSecondary }]}>Savdo tahlili</Text>
         </View>
-        <TouchableOpacity
-          style={[s.shareBtn, { backgroundColor: C.primary, opacity: sharing ? 0.6 : 1 }]}
-          onPress={tab === "umumiy" ? handleShareUmumiy : tab === "kassa" ? handleShareKassa : handleShareMijoz}
-          disabled={sharing || (tab === "mijoz" && !custReport) || (tab === "kassa" && !kassaReport)}
-          activeOpacity={0.8}
-        >
-          {sharing
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Feather name="share-2" size={16} color="#fff" />}
-          <Text style={s.shareTxt}>{Platform.OS === "web" ? "Yuklash" : "Ulashish"}</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {/* Chop etish */}
+          <TouchableOpacity
+            style={[s.printBtn, { backgroundColor: "#F0FDF4", borderColor: "#86EFAC", opacity: printing ? 0.6 : 1 }]}
+            onPress={handlePrint}
+            disabled={printing}
+            activeOpacity={0.8}
+          >
+            {printing
+              ? <ActivityIndicator size="small" color="#16a34a" />
+              : <Feather name="printer" size={16} color="#16a34a" />}
+            <Text style={[s.printTxt, { color: "#15803d" }]}>Chop etish</Text>
+          </TouchableOpacity>
+          {/* Ulashish */}
+          <TouchableOpacity
+            style={[s.shareBtn, { backgroundColor: C.primary, opacity: printing ? 0.6 : 1 }]}
+            onPress={handleShare}
+            disabled={printing}
+            activeOpacity={0.8}
+          >
+            {printing
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Feather name="share-2" size={16} color="#fff" />}
+            <Text style={s.shareTxt}>PDF</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Tabs */}
-      <View style={s.tabs}>
-        {([["umumiy","Umumiy"], ["mijoz","Mijoz"], ["kassa","Kassa"]] as const).map(([key, lbl]) => (
-          <TouchableOpacity key={key} style={[s.tab, tab === key && s.tabActive]} onPress={() => setTab(key)}>
-            <Text style={[s.tabTxt, { color: tab === key ? C.primary : C.textSecondary }]}>{lbl}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tabsScroll} contentContainerStyle={s.tabsContent}>
+        {([
+          ["umumiy", "Umumiy", "bar-chart-2"],
+          ["mijoz", "Mijoz", "users"],
+          ["kassa", "Kassa", "credit-card"],
+          ["kirim-chiqim", "Kirim-Chiqim", "trending-up"],
+        ] as const).map(([key, lbl, icon]) => (
+          <TouchableOpacity key={key} style={[s.tab, tab === key && { backgroundColor: C.primary, borderRadius: 20 }]} onPress={() => setTab(key)}>
+            <Feather name={icon as any} size={14} color={tab === key ? "#fff" : C.textSecondary} />
+            <Text style={[s.tabTxt, { color: tab === key ? "#fff" : C.textSecondary }]}>{lbl}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
+      {/* ═══ UMUMIY TAB ════════════════════════════════════════════════════════ */}
       {tab === "umumiy" && (
         <>
-          {/* Period selector */}
           <View style={s.periodBar}>
             {PERIODS.map(p => (
-              <TouchableOpacity
-                key={p.key}
-                onPress={() => setPeriod(p.key)}
-                style={[s.periodBtn, period === p.key && { backgroundColor: C.primary, borderRadius: 10 }]}
-              >
+              <TouchableOpacity key={p.key} onPress={() => setPeriod(p.key)}
+                style={[s.periodBtn, period === p.key && { backgroundColor: C.primary, borderRadius: 10 }]}>
                 <Text style={[s.periodTxt, { color: period === p.key ? "#fff" : C.textSecondary }]}>{p.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
-
-          <ScrollView
-            contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
-          >
-            {isLoadingMain && (
-              <View style={s.center}>
-                <ActivityIndicator color={C.primary} />
-                <Text style={[s.loadTxt, { color: C.textSecondary }]}>Yuklanmoqda...</Text>
-              </View>
-            )}
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+            {isLoadingMain && <View style={s.center}><ActivityIndicator color={C.primary} /></View>}
             {!isLoadingMain && (
               <>
-                {/* Moliyaviy jami */}
                 <View style={[s.mainCard, { backgroundColor: C.primary }]}>
                   <Text style={s.mainLabel}>Olingan tovar jami · {PERIOD_UZ[period]}</Text>
                   <Text style={s.mainValue}>{nfull(gen?.totalTovar)}</Text>
                   <View style={s.kpiRow}>
-                    <View style={s.kpiItem}>
-                      <Text style={s.kpiNum}>{mln(gen?.totalZaklat ?? 0)}</Text>
-                      <Text style={s.kpiLbl}>Zaklat</Text>
-                    </View>
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{mln(gen?.totalZaklat ?? 0)}</Text><Text style={s.kpiLbl}>Zaklat</Text></View>
                     <View style={s.kpiDivider} />
-                    <View style={s.kpiItem}>
-                      <Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(gen?.totalQarz ?? 0)}</Text>
-                      <Text style={s.kpiLbl}>Qolgan qarz</Text>
-                    </View>
+                    <View style={s.kpiItem}><Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln((gen?.totalQarz ?? 0) || (qarzStats?.berildiJami ?? 0))}</Text><Text style={s.kpiLbl}>Qarz</Text></View>
                     <View style={s.kpiDivider} />
-                    <View style={s.kpiItem}>
-                      <Text style={s.kpiNum}>{gen?.totalOrders ?? 0}</Text>
-                      <Text style={s.kpiLbl}>Buyurtma</Text>
-                    </View>
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{gen?.totalOrders ?? 0}</Text><Text style={s.kpiLbl}>Buyurtma</Text></View>
                   </View>
                 </View>
 
-                {/* Moliyaviy tafsilot */}
                 <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
                   <Text style={[s.sectionTitle, { color: C.text }]}>Moliyaviy tafsilot</Text>
                   <View style={{ gap: 0, marginTop: 8 }}>
-                    <StatRow icon="shopping-bag" color="#4F46E5" label="Olingan tovar (jami)" value={nfull(gen?.totalTovar)} />
+                    <StatRow icon="shopping-bag" color="#4F46E5" label="Olingan tovar (jami)"   value={nfull(gen?.totalTovar)} />
                     <StatRow icon="check-circle" color="#10B981" label="Jami to'langan (zaklat)" value={nfull(gen?.totalZaklat)} />
-                    <StatRow icon="alert-circle" color="#EF4444" label="Qolgan qarz" value={nfull(gen?.totalQarz)} />
-                    <StatRow icon="tool" color="#8B5CF6" label="O'rnatish ishlari" value={nfull(gen?.totalOrnatish)} />
-                    <StatRow icon="layers" color="#F59E0B" label="Karniiz/aksessuarlar" value={nfull(gen?.totalKarniiz)} />
+                    <StatRow icon="alert-circle" color="#EF4444" label="Qolgan qarz"             value={nfull((gen?.totalQarz ?? 0) || (qarzStats?.berildiJami ?? 0))} />
+                    <StatRow icon="arrow-down-left" color="#10B981" label="Qarz olindi"          value={nfull(qarzStats?.olindiJami)} />
+                    <StatRow icon="arrow-up-right"  color="#F43F5E" label="Qarz berildi"         value={nfull(qarzStats?.berildiJami)} />
+                    <StatRow icon="tool"         color="#8B5CF6" label="O'rnatish ishlari"       value={nfull(gen?.totalOrnatish)} />
+                    <StatRow icon="scissors"     color="#F59E0B" label="Chevar haqi"             value={nfull(gen?.totalChevar)} />
+                    <StatRow icon="layers"       color="#06B6D4" label="Karniiz/aksessuarlar"    value={nfull(gen?.totalKarniiz)} />
                   </View>
                 </View>
 
-                {/* Bitishuvlar */}
                 <View style={s.gridRow}>
                   <View style={[s.gridCard, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
-                    <Feather name="activity" size={18} color="#3B82F6" />
+                    <Feather name="activity"    size={18} color="#3B82F6" />
                     <Text style={[s.gridNum, { color: "#1D4ED8" }]}>{gen?.activeDeals ?? 0}</Text>
                     <Text style={[s.gridLbl, { color: "#3B82F6" }]}>Faol</Text>
                   </View>
@@ -404,7 +540,6 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
                   </View>
                 </View>
 
-                {/* Kunlik grafik */}
                 {dailyData.length > 0 && (
                   <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
                     <Text style={[s.sectionTitle, { color: C.text }]}>Kunlik savdo</Text>
@@ -415,11 +550,9 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
                           const barH = Math.max(4, Math.round(pct * 80));
                           return (
                             <View key={i} style={{ alignItems: "center", gap: 4, minWidth: 32 }}>
-                              <Text style={{ fontSize: 9, color: C.textSecondary, fontFamily: "Inter_400Regular" }}>{mln(d.sales)}</Text>
+                              <Text style={{ fontSize: 9, color: C.textSecondary }}>{mln(d.sales)}</Text>
                               <View style={{ width: 22, height: barH, backgroundColor: C.primary, borderRadius: 4 }} />
-                              <Text style={{ fontSize: 10, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>
-                                {new Date(d.date).getDate()}
-                              </Text>
+                              <Text style={{ fontSize: 10, color: C.textSecondary }}>{new Date(d.date).getDate()}</Text>
                             </View>
                           );
                         })}
@@ -428,7 +561,6 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
                   </View>
                 )}
 
-                {/* Holatlar bo'yicha */}
                 {statusEntries.length > 0 && (
                   <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
                     <Text style={[s.sectionTitle, { color: C.text }]}>Buyurtma holatlari</Text>
@@ -436,12 +568,8 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
                       {statusEntries.map(([status, count], i) => (
                         <View key={status} style={{ gap: 4 }}>
                           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                            <Text style={{ fontSize: 13, fontFamily: "Inter_500Medium", color: C.text }}>
-                              {STATUS_LABELS[status] ?? status}
-                            </Text>
-                            <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: STATUS_COLORS[i % STATUS_COLORS.length] }}>
-                              {count as number} ta
-                            </Text>
+                            <Text style={{ fontSize: 13, color: C.text }}>{STATUS_LABELS[status] ?? status}</Text>
+                            <Text style={{ fontSize: 13, fontWeight: "600", color: STATUS_COLORS[i % STATUS_COLORS.length] }}>{count as number} ta</Text>
                           </View>
                           <MiniBar value={count as number} max={maxStatusCount} color={STATUS_COLORS[i % STATUS_COLORS.length]} />
                         </View>
@@ -449,311 +577,218 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
                     </View>
                   </View>
                 )}
-
-                {/* Bugun vs Oy */}
-                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
-                  <Text style={[s.sectionTitle, { color: C.text }]}>Bugun vs Oy</Text>
-                  <View style={{ gap: 10, marginTop: 8 }}>
-                    <View style={s.compareRow}>
-                      <View style={[s.compareIcon, { backgroundColor: "#EDE9FE" }]}>
-                        <Feather name="sun" size={14} color="#7C3AED" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[s.compareLabel, { color: C.textSecondary }]}>Bugungi savdo</Text>
-                        <Text style={[s.compareValue, { color: C.text }]}>{nfull(dash?.todaySales)}</Text>
-                      </View>
-                      <Text style={[s.compareCount, { color: C.textSecondary }]}>{dash?.todayOrders ?? 0} ta</Text>
-                    </View>
-                    <View style={s.compareRow}>
-                      <View style={[s.compareIcon, { backgroundColor: "#DBEAFE" }]}>
-                        <Feather name="calendar" size={14} color="#2563EB" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[s.compareLabel, { color: C.textSecondary }]}>Bu oylik savdo</Text>
-                        <Text style={[s.compareValue, { color: C.text }]}>{nfull(dash?.monthSales)}</Text>
-                      </View>
-                      <Text style={[s.compareCount, { color: C.textSecondary }]}>{dash?.monthOrders ?? 0} ta</Text>
-                    </View>
-                  </View>
-                </View>
               </>
             )}
           </ScrollView>
         </>
       )}
 
-      {tab === "mijoz" && (
-        <ScrollView
-          contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Search */}
-          <View style={[s.searchWrap, { backgroundColor: C.surface, borderColor: C.border }]}>
-            <Feather name="search" size={16} color={C.textSecondary} />
-            <TextInput
-              style={[s.searchInput, { color: C.text }]}
-              placeholder="Mijoz ismi yoki telefon..."
-              placeholderTextColor={C.textSecondary}
-              value={search}
-              onChangeText={v => { setSearch(v); setSelectedCustomer(null); }}
-              autoCapitalize="none"
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => { setSearch(""); setSelectedCustomer(null); }}>
-                <Feather name="x" size={16} color={C.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Customer list */}
-          {custFetching && <ActivityIndicator color={C.primary} style={{ paddingVertical: 12 }} />}
-          {!custFetching && search.length > 1 && !selectedCustomer && (
-            (customers as any[]).length === 0
-              ? <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Mijoz topilmadi</Text>
-              : (customers as any[]).map((c: any) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[s.custCard, { backgroundColor: C.card, borderColor: C.border }]}
-                  onPress={() => { setSelectedCustomer(c); setSearch(c.fullName); }}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.custAvatar, { backgroundColor: C.primary + "18" }]}>
-                    <Text style={{ fontSize: 16, fontFamily: "Inter_700Bold", color: C.primary }}>
-                      {c.fullName?.[0]?.toUpperCase() ?? "?"}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.custName, { color: C.text }]}>{c.fullName}</Text>
-                    <Text style={[s.custPhone, { color: C.textSecondary }]}>{c.phone}</Text>
-                  </View>
-                  {(c.totalDebt ?? 0) > 0 && (
-                    <View style={[s.debtBadge, { backgroundColor: "#FEF2F2" }]}>
-                      <Text style={{ fontSize: 11, color: "#EF4444", fontFamily: "Inter_600SemiBold" }}>
-                        {mln(c.totalDebt)} qarz
-                      </Text>
-                    </View>
-                  )}
-                  <Feather name="chevron-right" size={16} color={C.textSecondary} />
-                </TouchableOpacity>
-              ))
-          )}
-
-          {/* Customer report */}
-          {selectedCustomer && (
-            custReportLoading
-              ? <View style={s.center}><ActivityIndicator color={C.primary} /><Text style={{ color: C.textSecondary, fontFamily: "Inter_400Regular", fontSize: 13 }}>Yuklanmoqda...</Text></View>
-              : custReport && (
-                <>
-                  {/* Summary card */}
-                  <View style={[s.mainCard, { backgroundColor: C.primary }]}>
-                    <Text style={s.mainLabel}>{custReport.customer.fullName} — Hisobot</Text>
-                    <Text style={[s.mainValue, { fontSize: 22 }]}>{nfull(custReport.summary.totalTovar)}</Text>
-                    <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 12 }}>
-                      {custReport.customer.phone} {custReport.customer.address ? "· " + custReport.customer.address : ""}
-                    </Text>
-                    <View style={s.kpiRow}>
-                      <View style={s.kpiItem}>
-                        <Text style={[s.kpiNum, { color: "#6EE7B7" }]}>{mln(custReport.summary.totalZaklat)}</Text>
-                        <Text style={s.kpiLbl}>To'langan</Text>
-                      </View>
-                      <View style={s.kpiDivider} />
-                      <View style={s.kpiItem}>
-                        <Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(custReport.summary.totalQarz)}</Text>
-                        <Text style={s.kpiLbl}>Qolgan qarz</Text>
-                      </View>
-                      <View style={s.kpiDivider} />
-                      <View style={s.kpiItem}>
-                        <Text style={s.kpiNum}>{custReport.summary.dealsCount}</Text>
-                        <Text style={s.kpiLbl}>Bitishuv</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Deals list */}
-                  {custReport.deals.length > 0 && (
-                    <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
-                      <Text style={[s.sectionTitle, { color: C.text }]}>Bitishuvlar tarixi</Text>
-                      <View style={{ gap: 10, marginTop: 8 }}>
-                        {custReport.deals.map((d: any) => (
-                          <View key={d.id} style={[s.dealCard, { backgroundColor: C.card, borderColor: C.border }]}>
-                            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                              <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_400Regular" }}>
-                                {d.createdAt ? new Date(d.createdAt).toLocaleDateString("uz-UZ") : "—"}
-                              </Text>
-                              <View style={[s.badge, { backgroundColor: d.status === "yopildi" ? "#ECFDF5" : "#EFF6FF" }]}>
-                                <Text style={{ fontSize: 11, color: d.status === "yopildi" ? "#10B981" : "#3B82F6", fontFamily: "Inter_600SemiBold" }}>
-                                  {STATUS_LABELS[d.status] ?? d.status}
-                                </Text>
-                              </View>
-                            </View>
-                            <View style={{ gap: 3 }}>
-                              <StatRow icon="shopping-bag" color="#4F46E5" label="Tovar narxi" value={nfull(d.totalNarx)} />
-                              <StatRow icon="check-circle" color="#10B981" label="Zaklat (to'langan)" value={nfull(d.zaklatSumma)} />
-                              {(d.qarzSumma ?? 0) > 0 && (
-                                <StatRow icon="alert-circle" color="#EF4444" label="Qolgan qarz" value={nfull(d.qarzSumma)} />
-                              )}
-                              {d.qaytarishMuddati && (
-                                <StatRow icon="calendar" color="#F59E0B" label="To'lov muddati" value={d.qaytarishMuddati} />
-                              )}
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                  )}
-
-                  {custReport.deals.length === 0 && (
-                    <View style={[s.emptyBox, { backgroundColor: C.card, borderColor: C.border }]}>
-                      <Feather name="inbox" size={28} color={C.textSecondary} />
-                      <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Bu mijozda bitishuv yo'q</Text>
-                    </View>
-                  )}
-                </>
-              )
-          )}
-
-          {!selectedCustomer && search.length <= 1 && (
-            <View style={[s.emptyBox, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Feather name="user-check" size={32} color={C.textSecondary} />
-              <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Mijoz nomi yoki telefon kiriting</Text>
-              <Text style={[{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_400Regular", textAlign: "center" }]}>
-                Topilgan mijozni tanlang — uning barcha bitishuvlari va qarz holati ko'rsatiladi
-              </Text>
-            </View>
-          )}
-        </ScrollView>
-      )}
-
+      {/* ═══ KASSA TAB ════════════════════════════════════════════════════════ */}
       {tab === "kassa" && (
         <>
           <View style={s.periodBar}>
-            {([["today","Bugun"],["week","Hafta"],["month","Oy"]] as const).map(([k, l]) => (
-              <TouchableOpacity
-                key={k}
-                onPress={() => setKassaPeriod(k)}
-                style={[s.periodBtn, kassaPeriod === k && { backgroundColor: C.primary, borderRadius: 10 }]}
-              >
-                <Text style={[s.periodTxt, { color: kassaPeriod === k ? "#fff" : C.textSecondary }]}>{l}</Text>
+            {(["today","week","month"] as KassaPeriod[]).map(pk => (
+              <TouchableOpacity key={pk} onPress={() => setKassaPeriod(pk)}
+                style={[s.periodBtn, kassaPeriod === pk && { backgroundColor: C.primary, borderRadius: 10 }]}>
+                <Text style={[s.periodTxt, { color: kassaPeriod === pk ? "#fff" : C.textSecondary }]}>
+                  {pk === "today" ? "Bugun" : pk === "week" ? "Hafta" : "Oy"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+            {kassaLoading && <View style={s.center}><ActivityIndicator color={C.primary} /></View>}
+            {!kassaLoading && kassaReport && (
+              <>
+                <View style={[s.mainCard, { backgroundColor: (kassaReport.netQoldiq ?? 0) >= 0 ? "#059669" : "#DC2626" }]}>
+                  <Text style={s.mainLabel}>Net qoldiq</Text>
+                  <Text style={s.mainValue}>{nfull(kassaReport.netQoldiq)}</Text>
+                  <View style={s.kpiRow}>
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{mln(kassaReport.netKirim ?? 0)}</Text><Text style={s.kpiLbl}>Kirim</Text></View>
+                    <View style={s.kpiDivider} />
+                    <View style={s.kpiItem}><Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(kassaReport.totalChiqim ?? 0)}</Text><Text style={s.kpiLbl}>Chiqim</Text></View>
+                    <View style={s.kpiDivider} />
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{kassaReport.shiftsCount ?? 0}</Text><Text style={s.kpiLbl}>Smena</Text></View>
+                  </View>
+                </View>
+
+                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                  <Text style={[s.sectionTitle, { color: C.text }]}>Kirimlar</Text>
+                  <StatRow icon="dollar-sign" color="#10B981" label="Naqd kirim"    value={nfull(kassaReport.totalNaqd)} />
+                  <StatRow icon="credit-card" color="#3B82F6" label="Plastik kirim" value={nfull(kassaReport.totalPlastik)} />
+                  <StatRow icon="arrow-up-circle" color="#6366F1" label="Jami kirim" value={nfull(kassaReport.netKirim)} />
+                </View>
+                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                  <Text style={[s.sectionTitle, { color: C.text }]}>Chiqimlar</Text>
+                  <StatRow icon="arrow-down-circle" color="#EF4444" label="Jami chiqim" value={nfull(kassaReport.totalChiqim)} />
+                </View>
+              </>
+            )}
+            {!kassaLoading && !kassaReport && (
+              <View style={s.center}><Text style={{ color: C.textSecondary }}>Kassa ma'lumotlari yo'q</Text></View>
+            )}
+          </ScrollView>
+        </>
+      )}
+
+      {/* ═══ KIRIM-CHIQIM TAB ════════════════════════════════════════════════ */}
+      {tab === "kirim-chiqim" && (
+        <>
+          {/* Oy/Yil tanlash */}
+          <View style={{ paddingHorizontal: 16, paddingVertical: 8, flexDirection: "row", gap: 8, borderBottomWidth: 1, borderBottomColor: C.border }}>
+            <TouchableOpacity onPress={() => {
+              if (kcMonth === 1) { setKcMonth(12); setKcYear(y => y - 1); }
+              else setKcMonth(m => m - 1);
+            }} style={[s.navBtn, { borderColor: C.border, backgroundColor: C.card }]}>
+              <Feather name="chevron-left" size={18} color={C.text} />
+            </TouchableOpacity>
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.primary + "15", borderRadius: 10, paddingVertical: 6 }}>
+              <Text style={{ fontWeight: "700", fontSize: 14, color: C.primary }}>
+                {MONTHS_UZ[kcMonth - 1]} {kcYear}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => {
+              if (kcMonth === 12) { setKcMonth(1); setKcYear(y => y + 1); }
+              else setKcMonth(m => m + 1);
+            }} style={[s.navBtn, { borderColor: C.border, backgroundColor: C.card }]}>
+              <Feather name="chevron-right" size={18} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+            {kcLoading && <View style={s.center}><ActivityIndicator color={C.primary} /></View>}
+            {!kcLoading && kcData && (
+              <>
+                {/* Sof foyda karta */}
+                <View style={[s.mainCard, { backgroundColor: (kcS.sof ?? 0) >= 0 ? "#059669" : "#DC2626" }]}>
+                  <Text style={s.mainLabel}>Sof foyda / zarar — {MONTHS_UZ[kcMonth - 1]} {kcYear}</Text>
+                  <Text style={s.mainValue}>
+                    {(kcS.sof ?? 0) >= 0 ? "+" : ""}{nfull(kcS.sof)}
+                  </Text>
+                  <View style={s.kpiRow}>
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{mln(kcS.jamiKirim ?? 0)}</Text><Text style={s.kpiLbl}>Kirim</Text></View>
+                    <View style={s.kpiDivider} />
+                    <View style={s.kpiItem}><Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(kcS.jamiChiqim ?? 0)}</Text><Text style={s.kpiLbl}>Chiqim</Text></View>
+                    <View style={s.kpiDivider} />
+                    <View style={s.kpiItem}><Text style={s.kpiNum}>{kcS.smenalar ?? 0}</Text><Text style={s.kpiLbl}>Smena</Text></View>
+                  </View>
+                </View>
+
+                {/* Savdo */}
+                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                  <Text style={[s.sectionTitle, { color: C.text }]}>Savdo natijalari</Text>
+                  <StatRow icon="shopping-bag" color="#4F46E5" label="Buyurtmalar"      value={`${kcD.buyurtmalar ?? 0} ta`} />
+                  <StatRow icon="trending-up"  color="#10B981" label="Savdo jami"       value={nfull(kcD.savdoJami)} />
+                  <StatRow icon="dollar-sign"  color="#16a34a" label="Naqd to'lov"      value={nfull(kcD.naqdJami)} />
+                  <StatRow icon="clock"        color="#EF4444" label="Qarzga berilgan"  value={nfull(kcD.qarzJami)} />
+                  <View style={{ marginTop: 8, backgroundColor: "#F0FDF4", borderRadius: 8, padding: 10 }}>
+                    <Text style={{ fontSize: 11, color: "#15803d", fontWeight: "600" }}>
+                      To'lov yig'ish: {kcD.savdoJami > 0 ? (((kcD.naqdJami ?? 0) / kcD.savdoJami) * 100).toFixed(1) : 0}%
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Kirim-chiqim */}
+                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                  <Text style={[s.sectionTitle, { color: C.text }]}>Kassa kirim-chiqim</Text>
+                  <StatRow icon="arrow-up-circle"   color="#10B981" label="Jami kirim"     value={nfull(kcS.jamiKirim)} />
+                  <StatRow icon="dollar-sign"       color="#16a34a" label="Naqd kirim"     value={nfull(kcS.naqdKirim)} />
+                  <StatRow icon="credit-card"       color="#3B82F6" label="Plastik kirim"  value={nfull(kcS.plastikKirim)} />
+                  <StatRow icon="arrow-down-circle" color="#EF4444" label="Jami chiqim"    value={nfull(kcS.jamiChiqim)} />
+                </View>
+
+                {/* Kategoriyalar */}
+                {(kcData.kategoriyalar ?? []).length > 0 && (
+                  <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                    <Text style={[s.sectionTitle, { color: C.text }]}>Kategoriyalar</Text>
+                    {kcData.kategoriyalar.map((k: any, i: number) => (
+                      <View key={i} style={s.statRow}>
+                        <View style={[s.statIcon, { backgroundColor: (k.tur === "kirim" ? "#10B981" : "#EF4444") + "18" }]}>
+                          <Feather name={k.tur === "kirim" ? "arrow-up" : "arrow-down"} size={13} color={k.tur === "kirim" ? "#10B981" : "#EF4444"} />
+                        </View>
+                        <Text style={[s.statLabel, { color: C.textSecondary }]}>{k.kategoriya ?? "boshqa"}</Text>
+                        <Text style={[s.statValue, { color: k.tur === "kirim" ? "#10B981" : "#EF4444" }]}>{nfull(k.total)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Kunlik jadval */}
+                {(kcData.dealRows ?? []).length > 0 && (
+                  <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                    <Text style={[s.sectionTitle, { color: C.text }]}>Kunlik savdo</Text>
+                    {kcData.dealRows.map((d: any, i: number) => (
+                      <View key={i} style={[s.statRow, { paddingVertical: 8 }]}>
+                        <Text style={{ fontSize: 12, color: C.textSecondary, width: 70 }}>
+                          {d.date ? new Date(d.date).toLocaleDateString("uz-UZ", { day: "numeric", month: "short" }) : "—"}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: C.text, flex: 1 }}>{nfull(d.savdo)}</Text>
+                        <Text style={{ fontSize: 12, color: "#10B981", marginRight: 8 }}>+{mln(d.naqdKirim ?? 0)}</Text>
+                        {(d.qarz ?? 0) > 0 && <Text style={{ fontSize: 12, color: "#EF4444" }}>-{mln(d.qarz)}</Text>}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+            {!kcLoading && !kcData && (
+              <View style={s.center}><Text style={{ color: C.textSecondary }}>Ma'lumot yo'q</Text></View>
+            )}
+          </ScrollView>
+        </>
+      )}
+
+      {/* ═══ MIJOZ TAB ════════════════════════════════════════════════════════ */}
+      {tab === "mijoz" && (
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}>
+          <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border, gap: 8 }]}>
+            <TextInput
+              style={[s.searchInput, { borderColor: C.border, backgroundColor: C.card, color: C.text }]}
+              value={search} onChangeText={setSearch}
+              placeholder="Mijoz ismi yoki telefoni..." placeholderTextColor={C.textSecondary}
+            />
+            {custFetching && <ActivityIndicator color={C.primary} />}
+            {customers.map((c: any) => (
+              <TouchableOpacity key={c.id}
+                style={[s.customerRow, { borderColor: selectedCustomer?.id === c.id ? C.primary : C.border, backgroundColor: selectedCustomer?.id === c.id ? C.primary + "10" : C.card }]}
+                onPress={() => setSelectedCustomer(c)}>
+                <View style={s.custIcon}><Feather name="user" size={16} color={C.primary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: C.text }}>{c.fullName ?? "—"}</Text>
+                  <Text style={{ fontSize: 12, color: C.textSecondary }}>{c.phone ?? ""}</Text>
+                </View>
+                {selectedCustomer?.id === c.id && <Feather name="check-circle" size={16} color={C.primary} />}
               </TouchableOpacity>
             ))}
           </View>
 
-          <ScrollView
-            contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 12 }}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
-          >
-            {kassaLoading && (
-              <View style={s.center}>
-                <ActivityIndicator color={C.primary} />
-                <Text style={[s.loadTxt, { color: C.textSecondary }]}>Yuklanmoqda...</Text>
+          {custReportLoading && <ActivityIndicator color={C.primary} />}
+          {custReport && (
+            <>
+              <View style={[s.mainCard, { backgroundColor: C.primary }]}>
+                <Text style={s.mainLabel}>{custReport.customer?.fullName ?? "Mijoz"}</Text>
+                <Text style={s.mainValue}>{nfull(custReport.summary?.totalTovar)}</Text>
+                <View style={s.kpiRow}>
+                  <View style={s.kpiItem}><Text style={s.kpiNum}>{custReport.summary?.dealsCount ?? 0}</Text><Text style={s.kpiLbl}>Bitishuv</Text></View>
+                  <View style={s.kpiDivider} />
+                  <View style={s.kpiItem}><Text style={s.kpiNum}>{mln(custReport.summary?.totalZaklat ?? 0)}</Text><Text style={s.kpiLbl}>To'landi</Text></View>
+                  <View style={s.kpiDivider} />
+                  <View style={s.kpiItem}><Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(custReport.summary?.totalQarz ?? 0)}</Text><Text style={s.kpiLbl}>Qarz</Text></View>
+                </View>
               </View>
-            )}
-
-            {!kassaLoading && kassaReport && (
-              <>
-                {/* Asosiy karta */}
-                <View style={[s.mainCard, { backgroundColor: "#4F46E5" }]}>
-                  <Text style={s.mainLabel}>Jami kirim · {kassaPeriod === "today" ? "Bugun" : kassaPeriod === "week" ? "Bu hafta" : "Bu oy"}</Text>
-                  <Text style={s.mainValue}>{nfull(kassaReport.netKirim)}</Text>
-                  <View style={s.kpiRow}>
-                    <View style={s.kpiItem}>
-                      <Text style={s.kpiNum}>{mln(kassaReport.totalNaqd)}</Text>
-                      <Text style={s.kpiLbl}>Naqd</Text>
-                    </View>
-                    <View style={s.kpiDivider} />
-                    <View style={s.kpiItem}>
-                      <Text style={s.kpiNum}>{mln(kassaReport.totalPlastik)}</Text>
-                      <Text style={s.kpiLbl}>Plastik</Text>
-                    </View>
-                    <View style={s.kpiDivider} />
-                    <View style={s.kpiItem}>
-                      <Text style={[s.kpiNum, { color: "#FCA5A5" }]}>{mln(kassaReport.totalChiqim)}</Text>
-                      <Text style={s.kpiLbl}>Chiqim</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Tafsilot */}
-                <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
-                  <Text style={[s.sectionTitle, { color: C.text }]}>Moliyaviy tafsilot</Text>
-                  <View style={{ gap: 0, marginTop: 8 }}>
-                    <StatRow icon="dollar-sign" color="#10B981" label="Naqd kirim" value={nfull(kassaReport.totalNaqd)} />
-                    <StatRow icon="credit-card" color="#3B82F6" label="Plastik kirim" value={nfull(kassaReport.totalPlastik)} />
-                    <StatRow icon="trending-up" color="#4F46E5" label="Jami kirim" value={nfull(kassaReport.netKirim)} />
-                    <StatRow icon="trending-down" color="#EF4444" label="Jami chiqim" value={nfull(kassaReport.totalChiqim)} />
-                    <StatRow icon="layers" color="#7C3AED" label="Net qoldiq" value={nfull(kassaReport.netQoldiq)} />
-                  </View>
-                </View>
-
-                {/* Smenalar soni */}
-                <View style={s.gridRow}>
-                  <View style={[s.gridCard, { backgroundColor: "#ECFDF5", borderColor: "#A7F3D0", flex: 1 }]}>
-                    <Feather name="unlock" size={18} color="#10B981" />
-                    <Text style={[s.gridNum, { color: "#059669" }]}>{kassaReport.shiftsCount}</Text>
-                    <Text style={[s.gridLbl, { color: "#10B981" }]}>Smenalar</Text>
-                  </View>
-                  <View style={[s.gridCard, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE", flex: 2 }]}>
-                    <Feather name="bar-chart-2" size={18} color="#3B82F6" />
-                    <Text style={[s.gridNum, { color: "#1D4ED8", fontSize: 16 }]}>
-                      {kassaReport.shiftsCount > 0 ? nfull(kassaReport.netKirim / kassaReport.shiftsCount) : "0 so'm"}
-                    </Text>
-                    <Text style={[s.gridLbl, { color: "#3B82F6" }]}>O'rtacha smena</Text>
-                  </View>
-                </View>
-
-                {/* Smenalar tarixi */}
-                {kassaReport.shifts?.length > 0 && (
-                  <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
-                    <Text style={[s.sectionTitle, { color: C.text }]}>Smenalar tarixi</Text>
-                    <View style={{ gap: 10, marginTop: 12 }}>
-                      {kassaReport.shifts.map((sh: any) => (
-                        <View key={sh.id} style={[s.dealCard, { backgroundColor: C.card, borderColor: C.border }]}>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                            <View>
-                              <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.text }}>
-                                {sh.ochilganSana ? new Date(sh.ochilganSana).toLocaleDateString("uz-UZ", { day: "numeric", month: "short" }) : "—"}
-                              </Text>
-                              <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: C.textSecondary }}>
-                                {sh.ochilganSana ? new Date(sh.ochilganSana).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" }) : ""}{sh.yopilganSana ? " – " + new Date(sh.yopilganSana).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" }) : ""}
-                              </Text>
-                            </View>
-                            <View style={[s.badge, { backgroundColor: sh.status === "ochiq" ? "#ECFDF5" : "#F1F5F9" }]}>
-                              <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: sh.status === "ochiq" ? "#10B981" : "#64748B" }}>
-                                {sh.status === "ochiq" ? "Faol" : "Yopiq"}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={{ flexDirection: "row", gap: 8 }}>
-                            <View style={{ flex: 1, backgroundColor: "#ECFDF5", borderRadius: 8, padding: 8, alignItems: "center" }}>
-                              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#10B981" }}>{mln(sh.naqdJami ?? 0)}</Text>
-                              <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#10B981" }}>Naqd</Text>
-                            </View>
-                            <View style={{ flex: 1, backgroundColor: "#EFF6FF", borderRadius: 8, padding: 8, alignItems: "center" }}>
-                              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#3B82F6" }}>{mln(sh.plastikJami ?? 0)}</Text>
-                              <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#3B82F6" }}>Plastik</Text>
-                            </View>
-                            <View style={{ flex: 1, backgroundColor: "#FEF2F2", borderRadius: 8, padding: 8, alignItems: "center" }}>
-                              <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#EF4444" }}>{mln(sh.chiqimJami ?? 0)}</Text>
-                              <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: "#EF4444" }}>Chiqim</Text>
-                            </View>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {kassaReport.shifts?.length === 0 && (
-                  <View style={[s.emptyBox, { backgroundColor: C.card, borderColor: C.border }]}>
-                    <Feather name="inbox" size={32} color={C.textSecondary} />
-                    <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Bu davrda smena yo'q</Text>
-                  </View>
-                )}
-              </>
-            )}
-          </ScrollView>
-        </>
+              <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                <Text style={[s.sectionTitle, { color: C.text }]}>Umumiy</Text>
+                <StatRow icon="shopping-bag" color="#4F46E5" label="Jami bitishuvlar"  value={`${custReport.summary?.dealsCount} ta`} />
+                <StatRow icon="check-circle" color="#10B981" label="Jami to'langan"   value={nfull(custReport.summary?.totalZaklat)} />
+                <StatRow icon="alert-circle" color="#EF4444" label="Qolgan qarz"      value={nfull(custReport.summary?.totalQarz)} />
+                <StatRow icon="activity"     color="#3B82F6" label="Faol bitishuvlar" value={`${custReport.summary?.activeDeals} ta`} />
+              </View>
+            </>
+          )}
+        </ScrollView>
       )}
     </View>
   );
@@ -761,52 +796,56 @@ h1{color:#4F46E5;margin:0 0 4px;}h2{color:#374151;margin:0 0 20px;font-size:14px
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
-  title: { fontSize: 24, fontFamily: "Inter_700Bold", color: C.text },
-  subtitle: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  shareBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  shareTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: "#fff" },
-  tabs: { flexDirection: "row", marginHorizontal: 16, marginBottom: 8, borderRadius: 12, backgroundColor: "#F1F5F9", padding: 4 },
-  tab: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 10 },
-  tabActive: { backgroundColor: "#fff" },
-  tabTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  periodBar: { flexDirection: "row", marginHorizontal: 16, marginBottom: 8, backgroundColor: "#F1F5F9", borderRadius: 12, padding: 4 },
-  periodBtn: { flex: 1, paddingVertical: 8, alignItems: "center" },
-  periodTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  mainCard: { borderRadius: 20, padding: 20 },
-  mainLabel: { fontSize: 13, color: "rgba(255,255,255,0.75)", fontFamily: "Inter_400Regular" },
-  mainValue: { fontSize: 26, color: "#fff", fontFamily: "Inter_700Bold", marginTop: 4, marginBottom: 4 },
-  kpiRow: { flexDirection: "row", alignItems: "center", marginTop: 12 },
+  header: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  title: { fontSize: 22, fontWeight: "900", color: C.text, fontFamily: "Inter_700Bold" },
+  subtitle: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  printBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 20, borderWidth: 1,
+  },
+  printTxt: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  shareBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
+  },
+  shareTxt: { fontSize: 13, fontWeight: "600", color: "#fff", fontFamily: "Inter_600SemiBold" },
+  tabsScroll: { borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 50 },
+  tabsContent: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 8, gap: 6 },
+  tab: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 6 },
+  tabTxt: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+  periodBar: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 8, gap: 4, borderBottomWidth: 1, borderBottomColor: C.border },
+  periodBtn: { flex: 1, alignItems: "center", paddingVertical: 5 },
+  periodTxt: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  mainCard: {
+    borderRadius: 16, padding: 20,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4,
+  },
+  mainLabel: { fontSize: 12, color: "rgba(255,255,255,.8)", fontFamily: "Inter_400Regular", marginBottom: 4 },
+  mainValue: { fontSize: 28, fontWeight: "900", color: "#fff", fontFamily: "Inter_700Bold", marginBottom: 12 },
+  kpiRow: { flexDirection: "row", alignItems: "center" },
   kpiItem: { flex: 1, alignItems: "center" },
-  kpiNum: { fontSize: 17, color: "#fff", fontFamily: "Inter_700Bold" },
-  kpiLbl: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontFamily: "Inter_400Regular" },
-  kpiDivider: { width: 1, height: 30, backgroundColor: "rgba(255,255,255,0.2)" },
-  gridRow: { flexDirection: "row", gap: 10 },
-  gridCard: { flex: 1, borderRadius: 14, borderWidth: 1, padding: 14, alignItems: "center", gap: 4 },
-  gridNum: { fontSize: 22, fontFamily: "Inter_700Bold" },
+  kpiNum: { fontSize: 16, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
+  kpiLbl: { fontSize: 10, color: "rgba(255,255,255,.7)", fontFamily: "Inter_400Regular", marginTop: 2 },
+  kpiDivider: { width: 1, height: 28, backgroundColor: "rgba(255,255,255,.2)" },
+  section: { borderRadius: 14, borderWidth: 1, padding: 14 },
+  sectionTitle: { fontSize: 14, fontWeight: "700", fontFamily: "Inter_700Bold", marginBottom: 4 },
+  gridRow: { flexDirection: "row", gap: 8 },
+  gridCard: { flex: 1, borderRadius: 12, borderWidth: 1, padding: 12, alignItems: "center", gap: 4 },
+  gridNum: { fontSize: 22, fontWeight: "900", fontFamily: "Inter_700Bold" },
   gridLbl: { fontSize: 11, fontFamily: "Inter_400Regular" },
-  section: { borderRadius: 16, borderWidth: 1, padding: 16 },
-  sectionTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  statRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: "#F1F5F9" },
-  statIcon: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  statRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.border + "80" },
+  statIcon: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", marginRight: 8 },
   statLabel: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular" },
-  statValue: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  statValue: { fontSize: 13, fontWeight: "700", fontFamily: "Inter_600SemiBold" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 40 },
+  searchInput: { borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 14, fontFamily: "Inter_400Regular" },
+  customerRow: { flexDirection: "row", alignItems: "center", borderWidth: 1.5, borderRadius: 10, padding: 10, gap: 10 },
+  custIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: C.primary + "15", alignItems: "center", justifyContent: "center" },
+  navBtn: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  tabs: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: C.border },
   compareRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  compareIcon: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  compareLabel: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  compareValue: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  compareCount: { fontSize: 12, fontFamily: "Inter_500Medium" },
-  searchWrap: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
-  searchInput: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
-  custCard: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 14, padding: 14 },
-  custAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
-  custName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
-  custPhone: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  debtBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  dealCard: { borderRadius: 12, borderWidth: 1, padding: 12 },
-  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  emptyBox: { borderWidth: 1, borderRadius: 16, borderStyle: "dashed", padding: 32, alignItems: "center", gap: 12 },
-  emptyTxt: { fontSize: 14, fontFamily: "Inter_500Medium" },
-  center: { alignItems: "center", justifyContent: "center", paddingVertical: 60, gap: 12 },
-  loadTxt: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  compareIcon: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
 });

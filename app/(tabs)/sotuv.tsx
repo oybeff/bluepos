@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
-import { printReceipt } from "@/lib/printer";
+import { printReceipt, ReceiptPaperSize } from "@/lib/printer";
 
 const C = Colors.light;
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
@@ -363,6 +363,7 @@ export default function SotuvScreen() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
+  const [receiptPaper, setReceiptPaper] = useState<ReceiptPaperSize>("80mm");
 
   const { data: products = [], refetch: refetchProducts } = useQuery<Product[]>({
     queryKey: ["products-for-sale"],
@@ -692,16 +693,36 @@ export default function SotuvScreen() {
                   <Text style={{ color: C.text, fontFamily: "Inter_600SemiBold" }}>{fmt(it.qty * it.price)}</Text>
                 </View>
               ))}
+              {/* Paper size selector */}
+              <View style={{ width: "100%", marginTop: 16 }}>
+                <Text style={{ fontSize: 11, color: C.textSecondary, fontFamily: "Inter_500Medium", marginBottom: 6 }}>Qog'oz o'lchami</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {([
+                    { key: "58mm" as ReceiptPaperSize, label: "58 mm", desc: "Kichik" },
+                    { key: "80mm" as ReceiptPaperSize, label: "80 mm", desc: "Standart" },
+                  ]).map(p => (
+                    <TouchableOpacity key={p.key} onPress={() => setReceiptPaper(p.key)}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, alignItems: "center",
+                        borderColor: receiptPaper === p.key ? C.primary : C.border,
+                        backgroundColor: receiptPaper === p.key ? C.primary + "15" : C.card }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold",
+                        color: receiptPaper === p.key ? C.primary : C.text }}>{p.label}</Text>
+                      <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular",
+                        color: receiptPaper === p.key ? C.primary : C.textSecondary }}>{p.desc}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
               {/* Print receipt button */}
               <TouchableOpacity
                 onPress={async () => {
                   try {
-                    await printReceipt(lastSale);
+                    await printReceipt(lastSale, "BluePOS", receiptPaper);
                   } catch (e: any) {
                     Alert.alert("Xato", e.message || "Chek chiqarishda xato");
                   }
                 }}
-                style={{ marginTop: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+                style={{ marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
                   width: "100%", paddingVertical: 13, borderRadius: 14, borderWidth: 1.5, borderColor: C.border,
                   backgroundColor: C.card }}
               >

@@ -2,15 +2,18 @@ import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Platform, Modal,
-  FlatList,
+  FlatList, Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import DateInput, { buildDateISO } from "@/components/DateInput";
 
 const C = Colors.light;
+
+const DEBT_SMS_TEXT = "Hurmatli mijoz, sizda parda xaridi bo'yicha qarzdorlik mavjud.\nTo'lovni imkon qadar tezroq amalga oshirishingizni so'raymiz.\nDo'kon: AL AMIN PARDALAR UYI\nTel: +998911741424";
 
 interface QarzDaftar {
   id: number; ism: string; telefon: string | null;
@@ -49,14 +52,18 @@ export default function QarzDaftarScreen() {
   const [tab, setTab] = useState<Tab>("barchasi");
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("yangi");
-  const [showModal, setShowModal] = useState<"create" | "detail" | "tolov" | null>(null);
+  const [showModal, setShowModal] = useState<"create" | "detail" | "tolov" | "sms" | null>(null);
   const [selected, setSelected] = useState<QarzDaftar | null>(null);
+  const [smsSelected, setSmsSelected] = useState<Set<number>>(new Set());
+  const [smsSending, setSmsSending] = useState(false);
   const [form, setForm] = useState({ ism: "", telefon: "", tur: "olindi" as "olindi" | "berildi", narsa: "", summa: "", izoh: "" });
-  const [formDate, setFormDate] = useState<Date | null>(null);
+  const [dateDay, setDateDay] = useState("");
+  const [dateMonth, setDateMonth] = useState("");
+  const [dateYear, setDateYear] = useState("");
   const [tolovSumma, setTolovSumma] = useState("");
   const [tolovIzoh, setTolovIzoh] = useState("");
 
-  const { data: qarzlar = [], isLoading, refetch } = useQuery<QarzDaftar[]>({
+  const { data: qarzlar = [], isLoading } = useQuery<QarzDaftar[]>({
     queryKey: ["qarz-daftar"],
     queryFn: async () => await apiReq("/qarz-daftar") as QarzDaftar[],
   });
@@ -65,18 +72,23 @@ export default function QarzDaftarScreen() {
     queryFn: async () => await apiReq("/qarz-daftar/stats") as Stats,
   });
 
+  function refreshQarzDaftar() {
+    qc.invalidateQueries({ queryKey: ["qarz-daftar"] });
+    qc.invalidateQueries({ queryKey: ["qarz-daftar-stats"] });
+  }
+
   const createMut = useMutation({
     mutationFn: () => apiReq("/qarz-daftar", {
       method: "POST",
-      body: JSON.stringify({ ...form, summa: form.summa || null, qaytarishSana: formDate?.toISOString() || null }),
+      body: JSON.stringify({ ...form, summa: form.summa || null, qaytarishSana: buildDateISO(dateDay, dateMonth, dateYear) }),
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["qarz-daftar", "qarz-daftar-stats"] }); setShowModal(null); Alert.alert("✅", "Qarz qo'shildi!"); resetForm(); },
+    onSuccess: () => { refreshQarzDaftar(); setShowModal(null); Alert.alert("✅", "Qarz qo'shildi!"); resetForm(); },
     onError: (e: any) => Alert.alert("Xato", e.message),
   });
   const tolovMut = useMutation({
     mutationFn: () => apiReq(`/qarz-daftar/${selected?.id}/tolov`, { method: "POST", body: JSON.stringify({ summa: parseFloat(tolovSumma), izoh: tolovIzoh || null }) }),
     onSuccess: async () => {
-      qc.invalidateQueries({ queryKey: ["qarz-daftar", "qarz-daftar-stats"] });
+      refreshQarzDaftar();
       setShowModal(null);
       Alert.alert("✅", "To'lov qo'shildi!");
       setTolovSumma(""); setTolovIzoh("");
@@ -85,15 +97,55 @@ export default function QarzDaftarScreen() {
   });
   const yopishMut = useMutation({
     mutationFn: (id: number) => apiReq(`/qarz-daftar/${id}/yopish`, { method: "PATCH", body: "{}" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["qarz-daftar", "qarz-daftar-stats"] }); setShowModal(null); },
+    onSuccess: () => { refreshQarzDaftar(); setShowModal(null); },
     onError: (e: any) => Alert.alert("Xato", e.message),
   });
   const deleteMut = useMutation({
     mutationFn: (id: number) => apiReq(`/qarz-daftar/${id}`, { method: "DELETE" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["qarz-daftar", "qarz-daftar-stats"] }); setShowModal(null); },
+    onSuccess: () => { refreshQarzDaftar(); setShowModal(null); },
   });
 
-  function resetForm() { setForm({ ism: "", telefon: "", tur: "olindi", narsa: "", summa: "", izoh: "" }); setFormDate(null); }
+  function resetForm() { setForm({ ism: "", telefon: "", tur: "olindi", narsa: "", summa: "", izoh: "" }); setDateDay(""); setDateMonth(""); setDateYear(""); }
+
+  // SMS
+  const smsEligible = useMemo(() => qarzlar.filter(q => q.telefon && (q.status === "ochiq" || q.status === "qisman")), [qarzlar]);
+
+  function openSmsModal() {
+    setSmsSelected(new Set());
+    setShowModal("sms");
+  }
+  function toggleSmsSelect(id: number) {
+    setSmsSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function selectAllSms() {
+    if (smsSelected.size === smsEligible.length) {
+      setSmsSelected(new Set());
+    } else {
+      setSmsSelected(new Set(smsEligible.map(q => q.id)));
+    }
+  }
+  async function sendSmsToSelected() {
+    if (smsSelected.size === 0) return;
+    setSmsSending(true);
+    let sent = 0, failed = 0;
+    try {
+      for (const id of smsSelected) {
+        const q = qarzlar.find(x => x.id === id);
+        if (!q?.telefon) continue;
+        try {
+          await apiReq("/sms/send", { method: "POST", body: JSON.stringify({ phone: q.telefon, message: DEBT_SMS_TEXT }) });
+          sent++;
+        } catch { failed++; }
+      }
+      setShowModal(null);
+      Alert.alert("✅ SMS yuborildi", `${sent} ta mijozga SMS yuborildi${failed ? `\n${failed} ta xato` : ""}`);
+    } catch { Alert.alert("Xato", "SMS yuborishda xato"); }
+    finally { setSmsSending(false); }
+  }
 
   const filtered = useMemo(() => {
     let list = qarzlar;
@@ -125,6 +177,9 @@ export default function QarzDaftarScreen() {
           <Text style={[s.title, { color: C.text }]}>Qarz daftar</Text>
           <Text style={[s.subtitle, { color: C.textSecondary }]}>Oldi-berdi hisoboti</Text>
         </View>
+        <TouchableOpacity style={[s.addBtn, { backgroundColor: "#DC2626" }]} onPress={openSmsModal}>
+          <Feather name="message-circle" size={18} color="#fff" />
+        </TouchableOpacity>
         <TouchableOpacity style={[s.addBtn, { backgroundColor: C.primary }]} onPress={() => { resetForm(); setShowModal("create"); }}>
           <Feather name="plus" size={18} color="#fff" />
         </TouchableOpacity>
@@ -286,6 +341,7 @@ export default function QarzDaftarScreen() {
       {/* ─── CREATE MODAL ─── */}
       <Modal visible={showModal === "create"} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
         <View style={s.overlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
           <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
             <View style={[s.sheetHeader, { borderBottomColor: C.border }]}>
               <Text style={[s.sheetTitle, { color: C.text }]}>Yangi qarz</Text>
@@ -321,25 +377,11 @@ export default function QarzDaftarScreen() {
               <Field label="Miqdor / Summa (so'm)" value={form.summa} onChange={v => setForm(f => ({ ...f, summa: v }))} placeholder="300000" keyboard="numeric" />
 
               {/* Qaytarish sanasi */}
-              <View style={{ gap: 6 }}>
-                <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Qaytarish muddati (YYYY-MM-DD)</Text>
-                <View style={[s.searchBox, { borderColor: C.border }]}>
-                  <Feather name="calendar" size={15} color={C.textSecondary} />
-                  <TextInput
-                    style={[s.searchInput, { color: C.text }]}
-                    value={formDate ? formDate.toISOString().slice(0, 10) : ""}
-                    onChangeText={v => { try { setFormDate(v ? new Date(v) : null); } catch { setFormDate(null); } }}
-                    placeholder="2025-12-31"
-                    placeholderTextColor={C.textSecondary}
-                    keyboardType="numbers-and-punctuation"
-                  />
-                  {formDate && (
-                    <TouchableOpacity onPress={() => setFormDate(null)}>
-                      <Feather name="x" size={14} color={C.textSecondary} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
+              <DateInput
+                label="Qaytarish muddati"
+                day={dateDay} month={dateMonth} year={dateYear}
+                onChangeDay={setDateDay} onChangeMonth={setDateMonth} onChangeYear={setDateYear}
+              />
 
               <Field label="Izoh" value={form.izoh} onChange={v => setForm(f => ({ ...f, izoh: v }))} multiline />
 
@@ -358,6 +400,7 @@ export default function QarzDaftarScreen() {
       {/* ─── DETAIL MODAL ─── */}
       <Modal visible={showModal === "detail" && !!selected} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
         <View style={s.overlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
           <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
             <View style={[s.sheetHeader, { borderBottomColor: C.border }]}>
               <Text style={[s.sheetTitle, { color: C.text }]}>{selected?.ism}</Text>
@@ -458,6 +501,7 @@ export default function QarzDaftarScreen() {
       {/* ─── TO'LOV MODAL ─── */}
       <Modal visible={showModal === "tolov"} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
         <View style={s.overlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
           <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
             <View style={[s.sheetHeader, { borderBottomColor: C.border }]}>
               <Text style={[s.sheetTitle, { color: C.text }]}>To'lov qo'shish</Text>
@@ -478,6 +522,73 @@ export default function QarzDaftarScreen() {
                 disabled={tolovMut.isPending || !tolovSumma}
               >
                 {tolovMut.isPending ? <ActivityIndicator color="#fff" /> : <Text style={s.saveBtnTxt}>Saqlash</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── SMS MODAL ─── */}
+      <Modal visible={showModal === "sms"} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
+        <View style={s.overlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
+          <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
+            <View style={[s.sheetHeader, { borderBottomColor: C.border }]}>
+              <Text style={[s.sheetTitle, { color: C.text }]}>SMS yuborish</Text>
+              <TouchableOpacity onPress={() => setShowModal(null)}><Feather name="x" size={20} color={C.textSecondary} /></TouchableOpacity>
+            </View>
+            <View style={{ padding: 16, gap: 12 }}>
+              {/* Select all */}
+              <TouchableOpacity style={[s.selectAllBtn, { borderColor: C.border, backgroundColor: smsSelected.size === smsEligible.length && smsEligible.length > 0 ? "#EEF2FF" : C.card }]} onPress={selectAllSms}>
+                <Feather name={smsSelected.size === smsEligible.length && smsEligible.length > 0 ? "check-square" : "square"} size={18} color={C.primary} />
+                <Text style={[s.selectAllTxt, { color: C.text }]}>Barchasini tanlash ({smsEligible.length} ta)</Text>
+              </TouchableOpacity>
+
+              {smsEligible.length === 0 ? (
+                <View style={{ alignItems: "center", padding: 20 }}>
+                  <Feather name="info" size={24} color={C.textSecondary} />
+                  <Text style={{ color: C.textSecondary, fontSize: 13, marginTop: 8, textAlign: "center" }}>Telefon raqami bor ochiq qarzlar yo'q</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={smsEligible}
+                  keyExtractor={i => i.id.toString()}
+                  style={{ maxHeight: 350 }}
+                  contentContainerStyle={{ gap: 8 }}
+                  renderItem={({ item: q }) => {
+                    const isChecked = smsSelected.has(q.id);
+                    return (
+                      <TouchableOpacity
+                        style={[s.smsItem, { borderColor: isChecked ? C.primary : C.border, backgroundColor: isChecked ? "#EEF2FF" : C.card }]}
+                        onPress={() => toggleSmsSelect(q.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Feather name={isChecked ? "check-square" : "square"} size={18} color={isChecked ? C.primary : C.textSecondary} />
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={[s.smsItemName, { color: C.text }]}>{q.ism}</Text>
+                          <Text style={{ fontSize: 11, color: C.primary, fontFamily: "Inter_400Regular" }}>{q.telefon}</Text>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          {q.qolganSumma ? <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: "#D97706" }}>{fmt(q.qolganSumma)}</Text> : q.summa ? <Text style={{ fontSize: 12, fontFamily: "Inter_700Bold", color: C.text }}>{fmt(q.summa)}</Text> : null}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              )}
+
+              {/* Send button */}
+              <TouchableOpacity
+                style={[s.saveBtn, { backgroundColor: smsSending || smsSelected.size === 0 ? C.border : "#DC2626" }]}
+                onPress={sendSmsToSelected}
+                disabled={smsSending || smsSelected.size === 0}
+              >
+                {smsSending ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <Feather name="send" size={16} color="#fff" />
+                    <Text style={s.saveBtnTxt}>SMS yuborish ({smsSelected.size} ta)</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -586,4 +697,8 @@ const s = StyleSheet.create({
   tolovDate: { fontSize: 10, fontFamily: "Inter_400Regular" },
   infoChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   infoChipTxt: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  selectAllBtn: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  selectAllTxt: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  smsItem: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  smsItemName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
 });

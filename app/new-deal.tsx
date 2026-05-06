@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import DateInput, { buildDateStr } from "@/components/DateInput";
 
 const C = Colors.light;
 
@@ -88,8 +89,12 @@ export default function NewDealScreen() {
 
   // Step 4 — To'lov
   const [zaklatSumma, setZaklatSumma] = useState("");
-  const [tayyorBolishKuni, setTayyorBolishKuni] = useState("");
-  const [qarzKaytarishKuni, setQarzKaytarishKuni] = useState("");
+  const [tayyorDay, setTayyorDay] = useState("");
+  const [tayyorMonth, setTayyorMonth] = useState("");
+  const [tayyorYear, setTayyorYear] = useState("");
+  const [qarzDay, setQarzDay] = useState("");
+  const [qarzMonth, setQarzMonth] = useState("");
+  const [qarzYear, setQarzYear] = useState("");
   const [izoh, setIzoh] = useState("");
 
   // Step 5 — Ishchilar
@@ -173,8 +178,8 @@ export default function NewDealScreen() {
         chevarJami,
         zaklatSumma: zaklat,
         qarzSumma: qarz,
-        tayyorBolishKuni: tayyorBolishKuni || null,
-        qarzKaytarishKuni: qarzKaytarishKuni || null,
+        tayyorBolishKuni: buildDateStr(tayyorDay, tayyorMonth, tayyorYear) || null,
+        qarzKaytarishKuni: buildDateStr(qarzDay, qarzMonth, qarzYear) || null,
         izoh: izoh.trim() || null,
         tailorWorkerId: tailorId,
         installerWorkerId: installerId,
@@ -185,14 +190,33 @@ export default function NewDealScreen() {
         body: JSON.stringify(body),
       }) as any;
 
+      // Agar qarz bo'lsa — qarz daftariga avtomatik qo'shish
+      if (qarz > 0) {
+        try {
+          await apiReq("/qarz-daftar", {
+            method: "POST",
+            body: JSON.stringify({
+              ism: mijozIsm || mijozPhone || "Noma'lum",
+              telefon: mijozPhone || null,
+              tur: "olindi",
+              narsa: `Buyurtma #${created.deal?.id ?? created.id} — parda`,
+              summa: qarz,
+              qaytarishSana: buildDateStr(qarzDay, qarzMonth, qarzYear) || null,
+              izoh: manzil ? `Manzil: ${manzil}` : null,
+            }),
+          });
+        } catch { /* qarz-daftar xatosi buyurtmani to'xtatmasin */ }
+      }
+
       await qc.invalidateQueries({ queryKey: ["client-deals"] });
       await qc.invalidateQueries({ queryKey: ["deals-recent"] });
+      await qc.invalidateQueries({ queryKey: ["qarz-daftar"] });
 
       Alert.alert(
         "✅ Buyurtma yaratildi",
         `${mijozIsm || mijozPhone || "Yangi"} mijoz uchun buyurtma muvaffaqiyatli saqlandi`,
         [
-          { text: "Ko'rish", onPress: () => router.replace(`/deal/${created.id}` as any) },
+          { text: "Ko'rish", onPress: () => router.replace(`/deal/${created.deal?.id ?? created.id}` as any) },
           { text: "Bosh sahifa", onPress: () => router.replace("/(tabs)") },
         ]
       );
@@ -367,8 +391,16 @@ export default function NewDealScreen() {
             )}
 
             <LabeledInput label="Zaklat summasi" value={zaklatSumma} onChange={setZaklatSumma} keyboardType="decimal-pad" placeholder="0" />
-            <LabeledInput label="Tayyor bo'lish kuni (YYYY-MM-DD)" value={tayyorBolishKuni} onChange={setTayyorBolishKuni} placeholder="2026-04-15" />
-            <LabeledInput label="Qarz qaytarish kuni (YYYY-MM-DD)" value={qarzKaytarishKuni} onChange={setQarzKaytarishKuni} placeholder="2026-05-01" />
+            <DateInput
+              label="Tayyor bo'lish kuni"
+              day={tayyorDay} month={tayyorMonth} year={tayyorYear}
+              onChangeDay={setTayyorDay} onChangeMonth={setTayyorMonth} onChangeYear={setTayyorYear}
+            />
+            <DateInput
+              label="Qarz qaytarish kuni"
+              day={qarzDay} month={qarzMonth} year={qarzYear}
+              onChangeDay={setQarzDay} onChangeMonth={setQarzMonth} onChangeYear={setQarzYear}
+            />
             <LabeledInput label="Izoh" value={izoh} onChange={setIzoh} multiline placeholder="Qo'shimcha ma'lumotlar..." />
           </View>
         )}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert,
@@ -27,10 +27,13 @@ export default function LoginScreen() {
   const [biometricType, setBiometricType] = useState<"fingerprint" | "face" | "none">("none");
   const [hasToken, setHasToken] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
+  const biometricTriggeredRef = useRef(false);
 
   const C = Colors.light;
 
   const triggerBiometric = useCallback(async (tokenOverride?: string) => {
+    if (biometricTriggeredRef.current) return;
+    biometricTriggeredRef.current = true;
     setBiometricLoading(true);
     try {
       const result = await LocalAuthentication.authenticateAsync({
@@ -56,6 +59,7 @@ export default function LoginScreen() {
     } catch {
       // ignore
     } finally {
+      biometricTriggeredRef.current = false;
       setBiometricLoading(false);
     }
   }, [authLogin]);
@@ -82,7 +86,8 @@ export default function LoginScreen() {
         }
       } catch { /* ignore */ }
     })();
-  }, [triggerBiometric]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleLogin() {
     if (!username.trim() || !password.trim()) {

@@ -59,6 +59,7 @@ interface Deal {
   measurements: Record<string, unknown> | null;
   izoh: string | null;
   smsYuborildi: string | null;
+  smsSent: number;
   createdAt: string;
 }
 
@@ -74,6 +75,7 @@ export default function DealDetailScreen() {
   const [payTur, setPayTur] = useState<"naqd"|"plastik">("naqd");
   const [payLoading, setPayLoading] = useState(false);
   const [sharingChek, setSharingChek] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 16);
 
   const { data: deal, isLoading, refetch } = useQuery<Deal>({
@@ -265,6 +267,37 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
     finally { setSharingChek(false); }
   }
 
+  async function handleDelete() {
+    Alert.alert(
+      "O'chirish",
+      "Buyurtma, barcha to'lovlar va tranzaksiyalar o'chiriladi. Davom etasizmi?",
+      [
+        { text: "Bekor qilish", style: "cancel" },
+        {
+          text: "O'chirish", style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await apiReq(`/client-deals/${id}`, { method: "DELETE" });
+              await Promise.all([
+                qc.invalidateQueries({ queryKey: ["client-deals"] }),
+                qc.invalidateQueries({ queryKey: ["deals-recent"] }),
+                qc.invalidateQueries({ queryKey: ["dashboard"] }),
+                qc.invalidateQueries({ queryKey: ["finance"] }),
+              ]);
+              Alert.alert("O'chirildi", "Buyurtma muvaffaqiyatli o'chirildi");
+              router.back();
+            } catch (e: any) {
+              Alert.alert("Xato", e.message);
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
   const NEXT_STATUSES: Record<string, string[]> = {
     yangi: ["tikuvda"],
     tikuvda: ["tayyor", "yangi"],
@@ -362,6 +395,29 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
           )}
         </Section>
 
+        {/* ── Qarz eslatmasi ── */}
+        {(deal.qarzSumma || 0) > 0 && (
+          <View style={[st.debtBanner, { backgroundColor: "#FEF2F2", borderColor: "#FECACA" }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#FEE2E2", alignItems: "center", justifyContent: "center" }}>
+                <Feather name="alert-circle" size={18} color="#DC2626" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 12, color: "#DC2626", fontFamily: "Inter_500Medium" }}>Mijoz qarzdor</Text>
+                <Text style={{ fontSize: 20, color: "#DC2626", fontFamily: "Inter_700Bold" }}>{fmt(deal.qarzSumma)}</Text>
+              </View>
+            </View>
+            {deal.qarzKaytarishKuni && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                <Feather name="calendar" size={13} color="#DC2626" />
+                <Text style={{ fontSize: 12, color: "#DC2626", fontFamily: "Inter_500Medium" }}>
+                  Qaytarish muddati: {fmtDate(deal.qarzKaytarishKuni)}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* ── Buyurtma tafsilotlari ── */}
         <Section title="Buyurtma tafsilotlari" icon="layers">
           <InfoRow icon="bar-chart-2" label="Umumiy material" value={`${deal.totalMaterial?.toFixed(2)} metr`} />
@@ -458,9 +514,9 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
         <Section title="Qo'shimcha" icon="info">
           <InfoRow
             icon="message-circle"
-            label="SMS yuborildi"
-            value={deal.smsYuborildi === "ha" ? "Ha ✓" : "Yo'q"}
-            valueColor={deal.smsYuborildi === "ha" ? "#059669" : C.textSecondary}
+            label="SMS yuborilgan"
+            value={deal.smsSent > 0 ? `${deal.smsSent} marta` : "Yuborilmagan"}
+            valueColor={deal.smsSent > 0 ? "#059669" : C.textSecondary}
           />
           {deal.izoh ? (
             <InfoRow icon="file-text" label="Izoh" value={deal.izoh} />
@@ -548,6 +604,20 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
           </Section>
         )}
 
+        {/* ── Tahrirlash ── */}
+        <TouchableOpacity
+          style={[st.taklifBtn, { backgroundColor: "#FFF7ED", borderColor: "#F59E0B" }]}
+          onPress={() => router.push(`/deal/${deal.id}/edit` as any)}
+          activeOpacity={0.85}
+        >
+          <Feather name="edit-3" size={18} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text style={[{ fontSize: 14, fontFamily: "Inter_700Bold", color: "#F59E0B" }]}>Buyurtmani tahrirlash</Text>
+            <Text style={[{ fontSize: 12, fontFamily: "Inter_400Regular", color: C.textSecondary }]}>Ma'lumotlarni o'zgartirish</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color="#F59E0B" />
+        </TouchableOpacity>
+
         {/* ── Taklifnoma ── */}
         <TouchableOpacity
           style={[st.taklifBtn, { backgroundColor: "#EEF2FF", borderColor: C.primary }]}
@@ -561,6 +631,23 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
             <Text style={[{ fontSize: 12, fontFamily: "Inter_400Regular", color: C.textSecondary }]}>Professional PDF taklif ulashish</Text>
           </View>
           <Feather name="chevron-right" size={16} color={C.primary} />
+        </TouchableOpacity>
+
+        {/* ── O'chirish ── */}
+        <TouchableOpacity
+          style={[st.deleteBtn, { opacity: deleting ? 0.6 : 1 }]}
+          onPress={handleDelete}
+          disabled={deleting}
+          activeOpacity={0.85}
+        >
+          {deleting ? (
+            <ActivityIndicator size="small" color="#DC2626" />
+          ) : (
+            <>
+              <Feather name="trash-2" size={16} color="#DC2626" />
+              <Text style={st.deleteBtnTxt}>Buyurtmani o'chirish</Text>
+            </>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
@@ -768,4 +855,11 @@ const st = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 12,
     padding: 16, borderRadius: 16, borderWidth: 1.5,
   },
+  deleteBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, padding: 14, borderRadius: 14,
+    backgroundColor: "#FEE2E2", borderWidth: 1, borderColor: "#FECACA",
+  },
+  deleteBtnTxt: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: "#DC2626" },
+  debtBanner: { borderRadius: 16, borderWidth: 1.5, padding: 16 },
 });

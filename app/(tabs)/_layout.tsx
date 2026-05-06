@@ -114,6 +114,7 @@ export default function TabLayout() {
       <Tabs.Screen name="mijozlar"       options={{ href: null }} />
       <Tabs.Screen name="sotuv"          options={{ href: null }} />
       <Tabs.Screen name="xodimlar"       options={{ href: null }} />
+      <Tabs.Screen name="shaxsiy-xarajatlar" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -1,5 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+// ─── 401 handler (token expired → auto logout) ──────────────────────────────
+
+let _onUnauthorized: (() => void) | null = null;
+
+export function setOnUnauthorized(cb: (() => void) | null): void {
+  _onUnauthorized = cb;
+}
+
 // ─── Base configuration ───────────────────────────────────────────────────────
 
 export function getApiUrl(): string {
@@ -53,6 +61,10 @@ export async function apiReq<T = unknown>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
+    // Auto-logout on 401 (token expired)
+    if (res.status === 401 && _onUnauthorized) {
+      _onUnauthorized();
+    }
     throw new ApiError(
       res.status,
       (body as any)?.error ?? `HTTP ${res.status}`,
@@ -273,6 +285,14 @@ export interface CreateProductData {
 
 export function createProduct(data: CreateProductData): Promise<Product> {
   return apiReq<Product>("/products", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function updateProduct(id: number, data: Partial<CreateProductData>): Promise<Product> {
+  return apiReq<Product>(`/products/${id}`, { method: "PUT", body: JSON.stringify(data) });
+}
+
+export function deleteProduct(id: number): Promise<void> {
+  return apiReq<void>(`/products/${id}`, { method: "DELETE" });
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────

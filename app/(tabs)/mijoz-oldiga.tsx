@@ -8,14 +8,16 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import DateInput, { buildDateStr } from "@/components/DateInput";
 import * as Location from "expo-location";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system";
 import { router } from "expo-router";
 
 const C = Colors.light;
 
-type PardaTuri = "oddiy" | "ikki_qavatli" | "karnizsiz";
+type PardaTuri = "oddiy" | "ikki_qavatli" | "karnizsiz" | "uch_baravar";
 type ItemType = "deraza" | "eshik";
 type KarniizTuri = "karniiz" | "baget";
 
@@ -48,12 +50,14 @@ interface RoomItem {
   boy: string;
   miqdor: number;
   pardaTuri: PardaTuri;
+  narxi: string;
 }
 
 interface Room {
   id: string;
   name: string;
   items: RoomItem[];
+  narxPerMetr: string;
 }
 
 interface Worker {
@@ -62,9 +66,10 @@ interface Worker {
 }
 
 const PARDA_TURLARI: { id: PardaTuri; label: string; koeff: number }[] = [
-  { id: "oddiy",        label: "Oddiy (×2)",       koeff: 2 },
-  { id: "ikki_qavatli", label: "Ikki qavatli",      koeff: 2 },
-  { id: "karnizsiz",    label: "Karnizsiz (×1.5)", koeff: 1.5 },
+  { id: "karnizsiz",    label: "1.5 baravar", koeff: 1.5 },
+  { id: "oddiy",        label: "2 baravar",   koeff: 2 },
+  { id: "ikki_qavatli", label: "2.5 baravar", koeff: 2.5 },
+  { id: "uch_baravar",  label: "3 baravar",   koeff: 3 },
 ];
 
 const ORNATISH_TURLARI = [
@@ -111,8 +116,8 @@ function calcKarniiz(k: KarniizItem): number {
 
 function newRoom(name = "Xona"): Room {
   return {
-    id: uid(), name,
-    items: [{ id: uid(), type: "deraza", label: "Deraza 1", en: "", boy: "", miqdor: 1, pardaTuri: "oddiy" }],
+    id: uid(), name, narxPerMetr: "",
+    items: [{ id: uid(), type: "deraza", label: "Deraza 1", en: "", boy: "", miqdor: 1, pardaTuri: "oddiy", narxi: "" }],
   };
 }
 
@@ -124,13 +129,14 @@ function calcItem(item: RoomItem): CalcResult | null {
   const en = p(item.en); const boy = p(item.boy);
   if (!en || !boy || en <= 0 || boy <= 0) return null;
   if (item.type === "eshik") {
-    return { materialEn: en, materialBoy: boy + QOSHIMCHA_BOY, birOyna: en * (boy + QOSHIMCHA_BOY), jami: en * (boy + QOSHIMCHA_BOY) * item.miqdor };
+    const eshikKoeff = PARDA_TURLARI.find(pt => pt.id === item.pardaTuri)?.koeff ?? 2;
+    return { materialEn: en, materialBoy: boy + QOSHIMCHA_BOY, birOyna: en * (boy + QOSHIMCHA_BOY), jami: en * (boy + QOSHIMCHA_BOY) * item.miqdor * eshikKoeff };
   }
   const koeff = PARDA_TURLARI.find(pt => pt.id === item.pardaTuri)?.koeff ?? 2;
-  const materialEn = en * koeff;
+  const materialEn = en;
   const materialBoy = boy + QOSHIMCHA_BOY;
   const birOyna = materialEn * materialBoy;
-  const jami = birOyna * item.miqdor;
+  const jami = birOyna * item.miqdor * koeff;
   return { materialEn, materialBoy, birOyna, jami };
 }
 
@@ -148,12 +154,15 @@ export default function MijozOldigaScreen() {
   const [manzil, setManzil]         = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
 
-  const [narxPerMetr, setNarxPerMetr]             = useState("");
   const [ornatishTuri, setOrnatishTuri]            = useState("");
   const [chevarHaqiPerMetr, setChevarHaqiPerMetr] = useState("");
   const [zaklatSumma, setZaklatSumma]             = useState("");
-  const [tayyorKun, setTayyorKun]                 = useState("");
-  const [qaytarishMuddati, setQaytarishMuddati]   = useState("");
+  const [tayyorDay, setTayyorDay]       = useState("");
+  const [tayyorMonth, setTayyorMonth]   = useState("");
+  const [tayyorYear, setTayyorYear]     = useState("");
+  const [qarzDay, setQarzDay]           = useState("");
+  const [qarzMonth, setQarzMonth]       = useState("");
+  const [qarzYear, setQarzYear]         = useState("");
   const [izoh, setIzoh]                           = useState("");
 
   const [selectedTailor, setSelectedTailor]       = useState<number | null>(null);
@@ -162,9 +171,13 @@ export default function MijozOldigaScreen() {
   const [karniizList, setKarniizList]       = useState<KarniizItem[]>([]);
   const [expandedKarniiz, setExpandedKarniiz] = useState<string>("");
 
-  const [saving, setSaving]         = useState(false);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [sending, setSending]       = useState(false);
+  const tayyorKun = buildDateStr(tayyorDay, tayyorMonth, tayyorYear);
+  const qaytarishMuddati = buildDateStr(qarzDay, qarzMonth, qarzYear);
+
+  const [saving, setSaving]             = useState(false);
+  const [pdfLoading, setPdfLoading]     = useState(false);
+  const [excelLoading, setExcelLoading] = useState(false);
+  const [sending, setSending]           = useState(false);
 
   const { data: workers = [] } = useQuery<Worker[]>({
     queryKey: ["workers-all"],
@@ -183,8 +196,10 @@ export default function MijozOldigaScreen() {
   }));
 
   const totalJami     = flatItems.reduce((s, fi) => s + fi.calc.jami, 0);
-  const narx          = p(narxPerMetr);
-  const totalNarx     = totalJami * narx;
+  const totalNarx     = flatItems.reduce((acc, fi) => {
+    const itemNarx = p(fi.item.narxi);
+    return acc + itemNarx * fi.calc.jami;
+  }, 0);
   const ornatishNarx  = ORNATISH_TURLARI.find(t => t.id === ornatishTuri)?.narx ?? 0;
   const jmDona        = rooms.reduce((s, r) => s + r.items.reduce((ss, i) => ss + i.miqdor, 0), 0);
   const ornatishJami  = ornatishNarx * jmDona;
@@ -218,12 +233,14 @@ export default function MijozOldigaScreen() {
     setRooms(prev => { const n = prev.filter(r => r.id !== id); return n.length ? n : [newRoom()]; });
   const updateRoomName = (id: string, name: string) =>
     setRooms(prev => prev.map(r => r.id === id ? { ...r, name } : r));
+  const updateRoomNarx = (id: string, narxPerMetr: string) =>
+    setRooms(prev => prev.map(r => r.id === id ? { ...r, narxPerMetr } : r));
 
   const addItem = (roomId: string, type: ItemType) => {
     const room = rooms.find(r => r.id === roomId);
     const cnt = (room?.items.filter(i => i.type === type).length ?? 0) + 1;
     const label = type === "deraza" ? `Deraza ${cnt}` : `Eshik ${cnt}`;
-    const def: RoomItem = { id: uid(), type, label, en: type === "deraza" ? "150" : "90", boy: type === "deraza" ? "160" : "210", miqdor: 1, pardaTuri: "oddiy" };
+    const def: RoomItem = { id: uid(), type, label, en: type === "deraza" ? "" : "", boy: type === "deraza" ? "" : "", miqdor: 1, pardaTuri: "oddiy", narxi: "" };
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, items: [...r.items, def] } : r));
     setExpandedItem(def.id);
   };
@@ -258,8 +275,9 @@ export default function MijozOldigaScreen() {
       en: p(item.en), boy: p(item.boy),
       materialEn: calc.materialEn, materialBoy: calc.materialBoy,
       miqdor: item.miqdor, pardaTuri: item.pardaTuri, jami: calc.jami,
+      narxPerMetr: p(item.narxi),
     })),
-    totalMaterial: totalJami, narxPerMetr: narx,
+    totalMaterial: totalJami, narxPerMetr: 0,
     totalNarx: grandTotal, ornatishTuri: ornatishTuri || null, ornatishNarx: ornatishJami,
     chevarHaqiPerMetr: chevarHaqi, chevarJami,
     karniizJami: karniizTotal,
@@ -275,27 +293,104 @@ export default function MijozOldigaScreen() {
     setSaving(true);
     try {
       await apiReq("/client-deals", { method: "POST", body: JSON.stringify(payload()) });
-      Alert.alert("Saqlandi!", "Bitishuv saqlandi", [{ text: "OK", onPress: () => router.back() }]);
-    } catch { Alert.alert("Xato", "Saqlashda xato yuz berdi"); }
+      Alert.alert("✅ Saqlandi!", "Bitishuv muvaffaqiyatli saqlandi", [{ text: "OK", onPress: () => {
+        try { router.back(); } catch { router.replace("/(tabs)/mijozlar" as any); }
+      }}]);
+    } catch (e: any) {
+      Alert.alert("Xato", e?.message || "Server bilan aloqa yo'q. Qayta urinib ko'ring.");
+    }
     finally { setSaving(false); }
   };
 
+  const DEBT_SMS_TEXT = "Hurmatli mijoz, sizda parda xaridi bo'yicha qarzdorlik mavjud.\nTo'lovni imkon qadar tezroq amalga oshirishingizni so'raymiz.\nDo'kon: AL AMIN PARDALAR UYI\nTel: +998911741424";
+
   const sendSms = async () => {
     if (!mijozPhone) { Alert.alert("Xato", "Mijoz telefon raqamini kiriting"); return; }
-    if (!totalJami)  { Alert.alert("Xato", "O'lchamlarni kiriting"); return; }
     setSending(true);
     try {
-      const text =
-        `Hurmatli ${mijozIsm || "mijoz"}, siz uchun parda hisob-kitob tayyor!\n` +
-        `Jami material: ${m(totalJami)}\n` +
-        (grandTotal > 0 ? `Umumiy narx: ${sum(grandTotal)}\n` : "") +
-        (zaklat > 0 ? `Zaklat: ${sum(zaklat)}\n` : "") +
-        (qarz > 0 ? `Qolgan qarz: ${sum(qarz)}\n` : "") +
-        `Tayyor sana: ${tayyorKun || "—"}\n— Bluepos tizimi`;
-      await apiReq("/sms/send", { method: "POST", body: JSON.stringify({ phone: mijozPhone, text }) });
+      await apiReq("/sms/send", { method: "POST", body: JSON.stringify({ phone: mijozPhone, message: DEBT_SMS_TEXT }) });
       Alert.alert("SMS yuborildi!", `${mijozPhone} raqamiga SMS yuborildi`);
     } catch { Alert.alert("Xato", "SMS yuborishda xato yuz berdi"); }
     finally { setSending(false); }
+  };
+
+  // Haydovchiga faqat manzil/lokatsiya yuborish
+  const sendLocationToDriver = async () => {
+    if (!manzil) { Alert.alert("Xato", "Avval manzilni kiriting yoki GPS tugmasini bosing"); return; }
+    try {
+      let mapLink = "";
+      const coords = manzil.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+      if (coords) {
+        mapLink = `https://maps.google.com/?q=${coords[1]},${coords[2]}`;
+      } else {
+        mapLink = `https://maps.google.com/?q=${encodeURIComponent(manzil)}`;
+      }
+      const installer = workers.find(w => w.id === selectedInstaller);
+      const lines: string[] = [
+        `📍 Mijoz manzili`,
+        mijozIsm ? `👤 Mijoz: ${mijozIsm}` : "",
+        mijozPhone ? `📞 Tel: ${mijozPhone}` : "",
+        ``,
+        `🗺️ Manzil: ${manzil}`,
+        ``,
+        mapLink,
+        ``,
+        tayyorKun ? `📦 O'rnatish sanasi: ${tayyorKun}` : "",
+        izoh ? `📝 Izoh: ${izoh}` : "",
+        ``,
+        `— Bluepos tizimi`,
+      ].filter(l => l !== undefined);
+      await Share.share({ message: lines.join("\n").trim() });
+    } catch (e: any) {
+      if (e.message !== "User did not share") Alert.alert("Xato", e.message || "Yuborib bo'lmadi");
+    }
+  };
+
+  // Chevarga faqat razmerlar (narxsiz) yuborish
+  const shareRazmerlarToChevar = async () => {
+    if (!totalJami) { Alert.alert("Xato", "Avval o'lchamlarni kiriting"); return; }
+    try {
+      const tailor = workers.find(w => w.id === selectedTailor);
+      const lines = [
+        `✂️ CHEVAR UCHUN — RAZMERLAR`,
+        tailor ? `👤 Chevar: ${tailor.fullName}` : "",
+        mijozIsm ? `🧑 Mijoz: ${mijozIsm}` : "",
+        manzil ? `📍 Manzil: ${manzil}` : "",
+        tayyorKun ? `📦 Tayyor bo'lish: ${tayyorKun}` : "",
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━━━`,
+      ];
+      rooms.forEach((room) => {
+        const roomItems = flatItems.filter(fi => fi.room.id === room.id);
+        if (!roomItems.length) return;
+        lines.push(`🏠 ${room.name}:`);
+        roomItems.forEach(({ item, calc }) => {
+          const icon = item.type === "deraza" ? "🪟" : "🚪";
+          const turi = item.type === "deraza" ? (PARDA_TURLARI.find(pt => pt.id === item.pardaTuri)?.label || "") : "Eshik";
+          lines.push(`  ${icon} ${item.label}`);
+          lines.push(`     • O'lcham: ${p(item.en).toFixed(2)}×${p(item.boy).toFixed(2)} m`);
+          lines.push(`     • Material: ${calc.materialEn.toFixed(2)}×${calc.materialBoy.toFixed(2)} m`);
+          lines.push(`     • Turi: ${turi} | Soni: ${item.miqdor} ta`);
+          lines.push(`     • Jami material: ${calc.jami.toFixed(2)} m`);
+        });
+      });
+      lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+      lines.push(`📦 JAMI MATERIAL: ${totalJami.toFixed(2)} m`);
+      lines.push(`🏠 Xonalar: ${rooms.length} ta | Dona: ${jmDona} ta`);
+      if (karniizList.length > 0) {
+        lines.push(``);
+        lines.push(`🔩 Karniiz va Baget:`);
+        karniizList.forEach(k => {
+          lines.push(`  ${k.turi === "karniiz" ? "—" : "≡"} ${k.nomi}: ${(p(k.uzunlik)/100).toFixed(2)} m`);
+        });
+      }
+      if (izoh) { lines.push(``); lines.push(`📝 Izoh: ${izoh}`); }
+      lines.push(``);
+      lines.push(`— Bluepos tizimi`);
+      await Share.share({ message: lines.filter(l => l !== undefined).join("\n") });
+    } catch (e: any) {
+      if (e.message !== "User did not share") Alert.alert("Xato", e.message || "Yuborib bo'lmadi");
+    }
   };
 
   const sendTelegram = async () => {
@@ -322,7 +417,8 @@ export default function MijozOldigaScreen() {
       lines.push(`🏠 *${room.name}*`);
       roomItems.forEach(({ item, calc }) => {
         const icon = item.type === "deraza" ? "🪟" : "🚪";
-        lines.push(`  ${icon} ${item.label}: ${p(item.en).toFixed(2)}×${p(item.boy).toFixed(2)}m → ${m(calc.jami)}`);
+        const iNarx = p(item.narxi);
+        lines.push(`  ${icon} ${item.label}: ${p(item.en).toFixed(2)}×${p(item.boy).toFixed(2)}m → ${m(calc.jami)}${iNarx > 0 ? ` · ${sum(iNarx * calc.jami)}` : ""}`);
       });
     });
     lines.push(`\n📦 Jami material: *${m(totalJami)}*`);
@@ -435,10 +531,16 @@ export default function MijozOldigaScreen() {
 </body></html>`;
 
       const { uri } = await Print.printToFileAsync({ html, base64: false });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Chevar varaqasini ulashish" });
-      } else { Alert.alert("PDF tayyor", uri); }
-    } catch { Alert.alert("Xato", "PDF yaratishda xato"); }
+      try {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Chevar varaqasini ulashish" });
+        } else {
+          await Share.share({ url: uri, title: "Chevar PDF" });
+        }
+      } catch {
+        await Share.share({ url: uri, title: "Chevar PDF" });
+      }
+    } catch (e: any) { Alert.alert("Xato", "PDF yaratishda xato: " + (e?.message || "")); }
     finally { setPdfLoading(false); }
   };
 
@@ -447,53 +549,340 @@ export default function MijozOldigaScreen() {
     setPdfLoading(true);
     try {
       const date = new Date().toLocaleDateString("uz-UZ", { year: "numeric", month: "long", day: "numeric" });
-      const rowsHtml = flatItems.map(({ room, item, calc }, i) =>
-        `<tr><td>${i+1}</td><td>${room.name}</td><td>${item.type === "deraza" ? "🪟" : "🚪"} ${item.label}</td><td>${p(item.en).toFixed(2)}×${p(item.boy).toFixed(2)}</td><td>${calc.materialEn.toFixed(2)}×${calc.materialBoy.toFixed(2)}</td><td>${item.type === "deraza" ? (PARDA_TURLARI.find(pt=>pt.id===item.pardaTuri)?.label||"") : "Eshik"}</td><td>${item.miqdor}ta</td><td>${calc.jami.toFixed(2)}m</td></tr>`
-      ).join("");
-      const html = `<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8"><style>
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:13px;color:#1a1a2e;padding:24px 32px}
-.hdr{text-align:center;border-bottom:2px solid #4f46e5;padding-bottom:12px;margin-bottom:16px}
-.hdr h1{font-size:24px;color:#4f46e5;font-weight:900;letter-spacing:2px}.hdr p{font-size:11px;color:#64748b;margin-top:3px}
-.sec{margin-bottom:14px}.stl{font-size:10px;font-weight:bold;color:#64748b;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;border-bottom:1px solid #e2e8f0;padding-bottom:3px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.ii{display:flex;flex-direction:column;gap:2px}
-.il{font-size:9px;color:#94a3b8;text-transform:uppercase}.iv{font-size:12px;font-weight:700;color:#1e293b}
-table{width:100%;border-collapse:collapse;font-size:11px}
-th{background:#f1f5f9;border:1px solid #e2e8f0;padding:6px 8px;text-align:left;font-size:10px;color:#475569;font-weight:bold}
-td{border:1px solid #e2e8f0;padding:6px 8px}tr:nth-child(even) td{background:#f8fafc}
-.tr td{font-weight:bold;background:#eef2ff!important;color:#4338ca}
-.pbox{border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
-.pr{display:flex;justify-content:space-between;padding:8px 12px;border-bottom:1px dashed #e2e8f0}
-.pr:last-child{border-bottom:none}.pl{color:#475569;font-size:12px}.pv{font-weight:700;font-size:12px}
-.grand{background:#4338ca;color:white;padding:10px 14px;display:flex;justify-content:space-between;border-radius:8px;margin-top:8px}
-.foot{border-top:1px solid #e2e8f0;margin-top:20px;padding-top:8px;text-align:center;color:#94a3b8;font-size:10px}
+      const ornatishLabel = ORNATISH_TURLARI.find(t => t.id === ornatishTuri)?.label || "";
+
+      const rowsHtml = flatItems.map(({ room, item, calc }, i) => {
+        const pardaLabel = item.type === "deraza"
+          ? (PARDA_TURLARI.find(pt => pt.id === item.pardaTuri)?.label || "")
+          : "Eshik";
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td>${room.name}</td>
+          <td>${item.label}</td>
+          <td style="text-align:center">${p(item.en).toFixed(2)} × ${p(item.boy).toFixed(2)}</td>
+          <td style="text-align:center;color:#4338ca;font-weight:700">${calc.materialEn.toFixed(2)} × ${calc.materialBoy.toFixed(2)}</td>
+          <td style="text-align:center">${pardaLabel}</td>
+          <td style="text-align:center">${item.miqdor} ta</td>
+          <td style="text-align:right;font-weight:700;color:#4338ca">${calc.jami.toFixed(2)} m</td>
+        </tr>`;
+      }).join("");
+
+      const karniizRowsHtml = karniizList.length > 0 ? karniizList.map((k, i) => {
+        const kTotal = calcKarniiz(k);
+        const uzL = (p(k.uzunlik) / 100).toFixed(2);
+        const parts: string[] = [];
+        if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni} × ${p(k.kronshteyn.narxi).toLocaleString("uz-UZ")}`);
+        if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni} × ${p(k.kruchka.narxi).toLocaleString("uz-UZ")}`);
+        if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${p(k.gulOyoq.narxi).toLocaleString("uz-UZ")}`);
+        if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni} × ${p(k.derjatel.narxi).toLocaleString("uz-UZ")}`);
+        if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni} × ${p(k.babon.narxi).toLocaleString("uz-UZ")}`);
+        if (k.popik.enabled) parts.push(`Popik: ${p(k.popik.narxi).toLocaleString("uz-UZ")}`);
+        if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m × ${p(k.tikuv.narxi).toLocaleString("uz-UZ")}`);
+        return `<tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td>${k.turi === "karniiz" ? "Karniiz" : "Baget"}</td>
+          <td>${k.nomi}</td>
+          <td style="text-align:center">${uzL} m</td>
+          <td style="font-size:10px;color:#64748b">${parts.join("; ") || "—"}</td>
+          <td style="text-align:right;font-weight:700;color:#4338ca">${kTotal.toLocaleString("uz-UZ")} so'm</td>
+        </tr>`;
+      }).join("") : "";
+
+      const html = `<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 18mm 20mm; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a2e; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #4f46e5; padding-bottom:12px; margin-bottom:16px; }
+  .brand { font-size:22px; font-weight:900; color:#4f46e5; letter-spacing:2px; }
+  .brand-sub { font-size:10px; color:#64748b; margin-top:2px; }
+  .hdr-right { text-align:right; font-size:11px; color:#475569; }
+  .sec { margin-bottom:14px; }
+  .stl { font-size:10px; font-weight:bold; color:#4f46e5; text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px; border-bottom:2px solid #e2e8f0; padding-bottom:3px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .info-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; }
+  .il { font-size:9px; color:#94a3b8; text-transform:uppercase; }
+  .iv { font-size:12px; font-weight:700; color:#1e293b; margin-top:2px; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#4f46e5; color:white; border:1px solid #3730a3; padding:6px 8px; text-align:center; font-size:10px; }
+  td { border:1px solid #e2e8f0; padding:5px 8px; }
+  tr:nth-child(even) td { background:#f8fafc; }
+  .tr-total td { font-weight:bold; background:#eef2ff !important; color:#4338ca; }
+  .narx-row { display:flex; justify-content:space-between; align-items:center; padding:7px 12px; border-bottom:1px dashed #e2e8f0; }
+  .narx-row:last-child { border-bottom:none; }
+  .narx-lbl { color:#475569; font-size:12px; }
+  .narx-val { font-weight:700; font-size:12px; color:#1e293b; }
+  .narx-box { border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; margin-bottom:8px; }
+  .grand-box { background:#4338ca; color:white; border-radius:8px; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .grand-lbl { font-size:12px; font-weight:bold; }
+  .grand-val { font-size:20px; font-weight:900; }
+  .pay-row { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-radius:6px; margin-bottom:6px; }
+  .foot { border-top:1px solid #e2e8f0; margin-top:20px; padding-top:8px; text-align:center; color:#94a3b8; font-size:10px; }
+  .sig-box { display:flex; justify-content:space-between; margin-top:16px; }
+  .sig-item { text-align:center; width:45%; }
+  .sig-line { border-top:1px solid #94a3b8; padding-top:4px; font-size:9px; color:#94a3b8; margin-top:24px; }
 </style></head><body>
-<div class="hdr"><h1>BLUPOS</h1><p>Parda, Karniiz va Jaluziya Do'koni — Hisob-kitob</p></div>
-${mijozIsm||mijozPhone||manzil?`<div class="sec"><div class="stl">Mijoz</div><div class="g2">
-${mijozIsm?`<div class="ii"><span class="il">Ism</span><span class="iv">${mijozIsm}</span></div>`:""}
-${mijozPhone?`<div class="ii"><span class="il">Tel</span><span class="iv">${mijozPhone}</span></div>`:""}
-${manzil?`<div class="ii" style="grid-column:span 2"><span class="il">Manzil</span><span class="iv">${manzil}</span></div>`:""}
-<div class="ii"><span class="il">Sana</span><span class="iv">${date}</span></div></div></div>`:`<p style="color:#64748b;font-size:11px;margin-bottom:14px">Sana: ${date}</p>`}
-<div class="sec"><div class="stl">Deraza va eshik o'lchamlari</div>
-<table><thead><tr><th>#</th><th>Xona</th><th>Nomi</th><th>O'lcham</th><th>Material</th><th>Turi</th><th>Soni</th><th>Jami</th></tr></thead>
-<tbody>${rowsHtml}<tr class="tr"><td colspan="7" style="text-align:right">Jami material:</td><td>${totalJami.toFixed(2)}m</td></tr></tbody></table></div>
-${narx>0||ornatishJami>0||chevarJami>0?`<div class="sec"><div class="stl">Narx</div><div class="pbox">
-${narx>0?`<div class="pr"><span class="pl">Parda (${totalJami.toFixed(2)}m × ${narx.toLocaleString("uz-UZ")}so'm)</span><span class="pv">${totalNarx.toLocaleString("uz-UZ")}so'm</span></div>`:""}
-${ornatishJami>0?`<div class="pr"><span class="pl">O'rnatish</span><span class="pv">${ornatishJami.toLocaleString("uz-UZ")}so'm</span></div>`:""}
-${chevarJami>0?`<div class="pr"><span class="pl">Chevar haqi</span><span class="pv">${chevarJami.toLocaleString("uz-UZ")}so'm</span></div>`:""}
-</div><div class="grand"><span style="font-weight:bold">UMUMIY NARX:</span><span style="font-size:18px;font-weight:900">${grandTotal.toLocaleString("uz-UZ")} so'm</span></div>
-${zaklat>0?`<div style="display:flex;justify-content:space-between;padding:6px 12px;background:#f0fdf4;border-radius:6px;margin-top:6px;font-size:12px;color:#166534"><span>Zaklat:</span><span style="font-weight:700">${zaklat.toLocaleString("uz-UZ")}so'm</span></div>`:""}
-${qarz>0?`<div style="display:flex;justify-content:space-between;padding:6px 12px;background:#fef2f2;border-radius:6px;margin-top:6px;font-size:12px;color:#991b1b"><span>Qolgan qarz:</span><span style="font-weight:700">${qarz.toLocaleString("uz-UZ")}so'm</span></div>`:""}
-</div>`:""}
-${tayyorKun?`<div class="sec"><div class="stl">Tayyor bo'lish sanasi</div><p style="font-size:14px;font-weight:bold;color:#1e293b">${tayyorKun}</p></div>`:""}
-${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 12px">${izoh}</p></div>`:""}
+
+<div class="hdr">
+  <div>
+    <div class="brand">BLUEPOS</div>
+    <div class="brand-sub">Parda, Karniiz va Jaluziya Do'koni — Hisob-kitob</div>
+  </div>
+  <div class="hdr-right">
+    <div>Sana: <strong>${date}</strong></div>
+    ${tayyorKun ? `<div style="color:#dc2626;margin-top:3px">Tayyor: <strong>${tayyorKun}</strong></div>` : ""}
+  </div>
+</div>
+
+<div class="sec">
+  <div class="stl">Mijoz ma'lumotlari</div>
+  <div class="grid3">
+    ${mijozIsm ? `<div class="info-box"><div class="il">Ism</div><div class="iv">${mijozIsm}</div></div>` : ""}
+    ${mijozPhone ? `<div class="info-box"><div class="il">Telefon</div><div class="iv">${mijozPhone}</div></div>` : ""}
+    <div class="info-box"><div class="il">Sana</div><div class="iv">${date}</div></div>
+    ${manzil ? `<div class="info-box" style="grid-column:span 3"><div class="il">Manzil / Adres</div><div class="iv">${manzil}</div></div>` : ""}
+  </div>
+</div>
+
+<div class="sec">
+  <div class="stl">Deraza va eshik o'lchamlari (razmerlar)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>Xona</th><th>Nomi</th>
+        <th>O'lcham (m)</th><th>Material (m)</th>
+        <th>Turi</th><th>Soni</th><th>Jami material</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+      <tr class="tr-total">
+        <td colspan="7" style="text-align:right">JAMI MATERIAL:</td>
+        <td style="text-align:right;font-size:13px">${totalJami.toFixed(2)} m</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+${karniizList.length > 0 ? `<div class="sec">
+  <div class="stl">Karniiz va Baget</div>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Turi</th><th>Nomi</th><th>Uzunlik</th><th>Aksessuarlar</th><th>Narx</th></tr>
+    </thead>
+    <tbody>
+      ${karniizRowsHtml}
+      <tr class="tr-total">
+        <td colspan="5" style="text-align:right">KARNIIZ JAMI:</td>
+        <td style="text-align:right;font-size:13px">${karniizTotal.toLocaleString("uz-UZ")} so'm</td>
+      </tr>
+    </tbody>
+  </table>
+</div>` : ""}
+
+<div class="sec">
+  <div class="stl">Narx hisob-kitob</div>
+  <div class="narx-box">
+    ${flatItems.filter(fi => p(fi.item.narxi) > 0).map(({ room, item, calc }) => {
+        const iNarx = p(item.narxi);
+        return `<div class="narx-row">
+          <span class="narx-lbl">${room.name} · ${item.label} (${calc.jami.toFixed(2)} m × ${iNarx.toLocaleString("uz-UZ")} so'm/m)</span>
+          <span class="narx-val">${(iNarx * calc.jami).toLocaleString("uz-UZ")} so'm</span>
+        </div>`;
+      }).join("")}
+    ${ornatishJami > 0 ? `<div class="narx-row">
+      <span class="narx-lbl">O'rnatish — ${ornatishLabel} (${jmDona} ta × ${ornatishNarx.toLocaleString("uz-UZ")} so'm)</span>
+      <span class="narx-val">${ornatishJami.toLocaleString("uz-UZ")} so'm</span>
+    </div>` : ""}
+    ${chevarJami > 0 ? `<div class="narx-row">
+      <span class="narx-lbl">Chevar haqi (${totalJami.toFixed(2)} m × ${chevarHaqi.toLocaleString("uz-UZ")} so'm/m)</span>
+      <span class="narx-val">${chevarJami.toLocaleString("uz-UZ")} so'm</span>
+    </div>` : ""}
+    ${karniizTotal > 0 ? `<div class="narx-row">
+      <span class="narx-lbl">Karniiz va Baget (${karniizList.length} dona)</span>
+      <span class="narx-val">${karniizTotal.toLocaleString("uz-UZ")} so'm</span>
+    </div>` : ""}
+  </div>
+
+  <div class="grand-box">
+    <span class="grand-lbl">UMUMIY NARX (JAMI):</span>
+    <span class="grand-val">${grandTotal.toLocaleString("uz-UZ")} so'm</span>
+  </div>
+
+  <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+    ${zaklat > 0 ? `<div class="pay-row" style="background:#f0fdf4;border-bottom:1px solid #bbf7d0">
+      <span style="font-size:12px;color:#166534;font-weight:600">Naqd to'lov (zaklat)</span>
+      <span style="font-size:14px;font-weight:900;color:#16a34a">${zaklat.toLocaleString("uz-UZ")} so'm</span>
+    </div>` : ""}
+    <div class="pay-row" style="background:${qarz > 0 ? "#fef2f2" : "#f0fdf4"}">
+      <div>
+        <span style="font-size:12px;color:${qarz > 0 ? "#991b1b" : "#166534"};font-weight:700">${qarz > 0 ? "Qolgan qarz" : "To'liq to'langan"}</span>
+        ${qaytarishMuddati && qarz > 0 ? `<div style="font-size:10px;color:#dc2626;margin-top:2px">Qaytarish muddati: ${qaytarishMuddati}</div>` : ""}
+      </div>
+      <span style="font-size:${qarz > 0 ? "18px" : "14px"};font-weight:900;color:${qarz > 0 ? "#dc2626" : "#16a34a"}">${qarz > 0 ? qarz.toLocaleString("uz-UZ") + " so'm" : "✓"}</span>
+    </div>
+  </div>
+</div>
+
+${tayyorKun || qaytarishMuddati || izoh ? `<div class="sec">
+  <div class="stl">Qo'shimcha ma'lumotlar</div>
+  <div class="grid2">
+    ${tayyorKun ? `<div class="info-box"><div class="il">Tayyor bo'lish sanasi</div><div class="iv" style="color:#1e293b">${tayyorKun}</div></div>` : ""}
+    ${qaytarishMuddati && qarz > 0 ? `<div class="info-box"><div class="il">Qarz qaytarish muddati</div><div class="iv" style="color:#dc2626">${qaytarishMuddati}</div></div>` : ""}
+    ${izoh ? `<div class="info-box" style="grid-column:span 2"><div class="il">Izoh</div><div class="iv" style="font-weight:400;color:#334155">${izoh}</div></div>` : ""}
+  </div>
+</div>` : ""}
+
+<div class="sig-box">
+  <div class="sig-item">
+    <div class="sig-line">Do'kon vakili imzosi</div>
+  </div>
+  <div class="sig-item">
+    <div class="sig-line">Mijoz imzosi</div>
+  </div>
+</div>
+
 <div class="foot">Bluepos tizimi | ${new Date().toLocaleString("uz-UZ")}</div>
 </body></html>`;
+
       const { uri } = await Print.printToFileAsync({ html, base64: false });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Hisob-kitobni saqlash" });
-      } else { Alert.alert("PDF tayyor", uri); }
-    } catch { Alert.alert("Xato", "PDF yaratishda xato"); }
+      try {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Hisob-kitobni saqlash" });
+        } else {
+          await Share.share({ url: uri, title: "Hisob-kitob PDF" });
+        }
+      } catch {
+        await Share.share({ url: uri, title: "Hisob-kitob PDF" });
+      }
+    } catch (e: any) { Alert.alert("Xato", "PDF yaratishda xato: " + (e?.message || "")); }
     finally { setPdfLoading(false); }
+  };
+
+  const generateExcel = async () => {
+    if (!totalJami) { Alert.alert("Xato", "O'lchamlarni kiriting"); return; }
+    setExcelLoading(true);
+    try {
+      const date = new Date().toLocaleDateString("uz-UZ");
+      const ornatishLabel = ORNATISH_TURLARI.find(t => t.id === ornatishTuri)?.label || "Yo'q";
+
+      const esc = (v: string | number) => {
+        const s = String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const row = (...cols: (string | number)[]) => cols.map(esc).join(",");
+
+      const lines: string[] = [];
+
+      lines.push(row("BLUEPOS — HISOB-KITOB"));
+      lines.push(row("Sana:", date));
+      lines.push("");
+
+      lines.push(row("MIJOZ MA'LUMOTLARI"));
+      if (mijozIsm)   lines.push(row("Ism:", mijozIsm));
+      if (mijozPhone) lines.push(row("Telefon:", mijozPhone));
+      if (manzil)     lines.push(row("Manzil / Adres:", manzil));
+      lines.push("");
+
+      lines.push(row("RAZMERLAR (O'LCHAMLAR)"));
+      lines.push(row("#", "Xona", "Nomi", "Turi", "Eni (m)", "Bo'yi (m)", "Material eni (m)", "Material bo'yi (m)", "Parda turi", "Soni (ta)", "Jami material (m)"));
+      flatItems.forEach(({ room, item, calc }, i) => {
+        const pardaLabel = item.type === "deraza"
+          ? (PARDA_TURLARI.find(pt => pt.id === item.pardaTuri)?.label || "")
+          : "Eshik";
+        lines.push(row(
+          i + 1, room.name, item.label,
+          item.type === "deraza" ? "Deraza" : "Eshik",
+          p(item.en).toFixed(2), p(item.boy).toFixed(2),
+          calc.materialEn.toFixed(2), calc.materialBoy.toFixed(2),
+          pardaLabel, item.miqdor, calc.jami.toFixed(2),
+        ));
+      });
+      lines.push(row("", "", "", "", "", "", "", "", "", "JAMI:", totalJami.toFixed(2)));
+      lines.push("");
+
+      if (karniizList.length > 0) {
+        lines.push(row("KARNIIZ VA BAGET"));
+        lines.push(row("#", "Turi", "Nomi", "Uzunlik (m)", "Aksessuarlar", "Narx (so'm)"));
+        karniizList.forEach((k, i) => {
+          const kTotal = calcKarniiz(k);
+          const uzL = (p(k.uzunlik) / 100).toFixed(2);
+          const parts: string[] = [];
+          if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni}×${p(k.kronshteyn.narxi).toLocaleString("uz-UZ")}`);
+          if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni}×${p(k.kruchka.narxi).toLocaleString("uz-UZ")}`);
+          if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${p(k.gulOyoq.narxi).toLocaleString("uz-UZ")}`);
+          if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni}×${p(k.derjatel.narxi).toLocaleString("uz-UZ")}`);
+          if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni}×${p(k.babon.narxi).toLocaleString("uz-UZ")}`);
+          if (k.popik.enabled) parts.push(`Popik: ${p(k.popik.narxi).toLocaleString("uz-UZ")}`);
+          if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m×${p(k.tikuv.narxi).toLocaleString("uz-UZ")}`);
+          lines.push(row(i + 1, k.turi === "karniiz" ? "Karniiz" : "Baget", k.nomi, uzL, parts.join("; ") || "—", kTotal));
+        });
+        lines.push(row("", "", "", "", "KARNIIZ JAMI:", karniizTotal));
+        lines.push("");
+      }
+
+      lines.push(row("NARX HISOB-KITOB"));
+      lines.push(row("Narx turi", "Tafsilot", "Summa (so'm)"));
+      flatItems.forEach(({ room, item, calc }) => {
+        const iNarx = p(item.narxi);
+        if (iNarx > 0 && calc.jami > 0) {
+          lines.push(row("Parda matosi", `${room.name} · ${item.label}: ${calc.jami.toFixed(2)} m × ${iNarx.toLocaleString("uz-UZ")} so'm/m`, iNarx * calc.jami));
+        }
+      });
+      if (ornatishJami > 0) lines.push(row("O'rnatish", `${ornatishLabel} — ${jmDona} ta × ${ornatishNarx.toLocaleString("uz-UZ")} so'm`, ornatishJami));
+      if (chevarJami > 0) lines.push(row("Chevar haqi", `${totalJami.toFixed(2)} m × ${chevarHaqi.toLocaleString("uz-UZ")} so'm/m`, chevarJami));
+      if (karniizTotal > 0) lines.push(row("Karniiz va Baget", `${karniizList.length} dona`, karniizTotal));
+      lines.push(row("UMUMIY NARX (JAMI)", "", grandTotal));
+      lines.push("");
+
+      lines.push(row("TO'LOV HOLATI"));
+      lines.push(row("To'lov turi", "Summa (so'm)"));
+      if (zaklat > 0) lines.push(row("Naqd to'lov (zaklat)", zaklat));
+      lines.push(row(qarz > 0 ? "Qolgan qarz" : "To'liq to'langan", qarz > 0 ? qarz : 0));
+      if (qaytarishMuddati && qarz > 0) lines.push(row("Qarz qaytarish muddati", qaytarishMuddati));
+      lines.push("");
+
+      if (tayyorKun || izoh) {
+        lines.push(row("QOSHIMCHA"));
+        if (tayyorKun) lines.push(row("Tayyor bo'lish sanasi:", tayyorKun));
+        if (izoh)      lines.push(row("Izoh:", izoh));
+      }
+
+      const csv = lines.join("\n");
+      const fileName = `bluepos_hisob_${Date.now()}.csv`;
+      if (Platform.OS === "web") {
+        const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = fileName; a.click();
+        URL.revokeObjectURL(url);
+        Alert.alert("✅", "Excel fayl yuklab olindi!");
+      } else {
+        try {
+          const file = new FileSystem.File(FileSystem.Paths.cache, fileName);
+          file.create({ overwrite: true });
+          file.write("\uFEFF" + csv);
+          const canShare = await Sharing.isAvailableAsync();
+          if (canShare) {
+            await Sharing.shareAsync(file.uri, {
+              mimeType: "text/csv",
+              UTI: "public.comma-separated-values-text",
+              dialogTitle: "Excel (CSV) faylni saqlash",
+            });
+          } else {
+            await Share.share({ message: csv, title: fileName });
+          }
+        } catch {
+          // File sharing failed — fallback to text share
+          await Share.share({ message: csv, title: fileName });
+        }
+      }
+    } catch (e: any) {
+      Alert.alert("Xato", "Excel yaratishda xato: " + (e?.message || ""));
+    } finally {
+      setExcelLoading(false);
+    }
   };
 
   return (
@@ -553,6 +942,7 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
             const isRoomOpen = expandedRoom === room.id;
             const roomFlatItems = flatItems.filter(fi => fi.room.id === room.id);
             const roomTotal = roomFlatItems.reduce((sum, fi) => sum + fi.calc.jami, 0);
+            const roomNarxTotal = roomFlatItems.reduce((s, fi) => s + p(fi.item.narxi) * fi.calc.jami, 0);
             return (
               <View key={room.id} style={[s.roomCard, { borderColor: isRoomOpen ? C.primary : C.border }]}>
                 {/* Room header */}
@@ -567,6 +957,27 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                       {room.items.filter(i => i.type === "deraza").length} deraza · {room.items.filter(i => i.type === "eshik").length} eshik
                       {roomTotal > 0 ? ` · ${m(roomTotal)}` : ""}
                     </Text>
+                    {/* Collapsed detail: item list with sizes and costs */}
+                    {!isRoomOpen && roomFlatItems.length > 0 && (
+                      <View style={{ marginTop: 4, gap: 2 }}>
+                        {roomFlatItems.map(({ item, calc }) => {
+                          const icon = item.type === "deraza" ? "🪟" : "🚪";
+                          const iNarx = p(item.narxi);
+                          const itemCost = iNarx > 0 ? iNarx * calc.jami : 0;
+                          return (
+                            <Text key={item.id} style={{ fontSize: 10, fontFamily: "Inter_400Regular", color: C.textSecondary }}>
+                              {icon} {item.label}: {p(item.en).toFixed(0)}×{p(item.boy).toFixed(0)} → {m(calc.jami)}
+                              {itemCost > 0 ? ` · ${sum(itemCost)}` : ""}
+                            </Text>
+                          );
+                        })}
+                        {roomNarxTotal > 0 && (
+                          <Text style={{ fontSize: 10, fontFamily: "Inter_600SemiBold", color: C.primary, marginTop: 2 }}>
+                            Jami: {sum(roomNarxTotal)}
+                          </Text>
+                        )}
+                      </View>
+                    )}
                   </View>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                     {rooms.length > 1 && (
@@ -598,6 +1009,7 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                         placeholder="Xona nomi" placeholderTextColor={C.textSecondary} />
                     </View>
 
+
                     {/* Items */}
                     {room.items.map((item) => {
                       const fi = flatItems.find(f => f.item.id === item.id);
@@ -610,10 +1022,15 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                         <View key={item.id} style={[s.itemCard, { backgroundColor: itemBg, borderColor: isItemOpen ? itemColor : itemBorder }]}>
                           <TouchableOpacity style={s.itemHead}
                             onPress={() => setExpandedItem(isItemOpen ? "" : item.id)}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1, flexWrap: "wrap" }}>
                               <Feather name={isD ? "grid" : "layout"} size={14} color={itemColor} />
                               <Text style={[s.itemLabel, { color: itemColor }]}>{item.label}</Text>
                               {fi && <Text style={[s.itemCalcBadge, { color: itemColor, backgroundColor: itemBg }]}>{m(fi.calc.jami)}</Text>}
+                              {fi && p(item.narxi) > 0 && (
+                                <Text style={{ fontSize: 10, fontFamily: "Inter_600SemiBold", color: "#92400E", backgroundColor: "#FFFBEB", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                  {sum(p(item.narxi) * fi.calc.jami)}
+                                </Text>
+                              )}
                             </View>
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                               <TouchableOpacity onPress={() => removeItem(room.id, item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -651,21 +1068,19 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                                 </View>
                               </View>
 
-                              {/* Parda turi (only for deraza) */}
-                              {isD && (
-                                <View style={{ gap: 6 }}>
-                                  <Text style={[s.fieldLabel, { color: C.textSecondary }]}>Parda turi</Text>
-                                  <View style={{ flexDirection: "row", gap: 6 }}>
-                                    {PARDA_TURLARI.map(pt => (
-                                      <TouchableOpacity key={pt.id}
-                                        style={[s.chip, { flex: 1, borderColor: item.pardaTuri === pt.id ? C.primary : itemBorder, backgroundColor: item.pardaTuri === pt.id ? "#DBEAFE" : "#fff" }]}
-                                        onPress={() => updateItem(room.id, item.id, { pardaTuri: pt.id })}>
-                                        <Text style={[s.chipTxt, { color: item.pardaTuri === pt.id ? "#1D4ED8" : C.textSecondary }]} numberOfLines={2}>{pt.label}</Text>
-                                      </TouchableOpacity>
-                                    ))}
-                                  </View>
+                              {/* Koeffitsient */}
+                              <View style={{ gap: 6 }}>
+                                <Text style={[s.fieldLabel, { color: C.textSecondary }]}>Koeffitsient</Text>
+                                <View style={{ flexDirection: "row", gap: 6 }}>
+                                  {PARDA_TURLARI.map(pt => (
+                                    <TouchableOpacity key={pt.id}
+                                      style={[s.chip, { flex: 1, borderColor: item.pardaTuri === pt.id ? C.primary : itemBorder, backgroundColor: item.pardaTuri === pt.id ? "#DBEAFE" : "#fff" }]}
+                                      onPress={() => updateItem(room.id, item.id, { pardaTuri: pt.id })}>
+                                      <Text style={[s.chipTxt, { color: item.pardaTuri === pt.id ? "#1D4ED8" : C.textSecondary }]} numberOfLines={2}>{pt.label}</Text>
+                                    </TouchableOpacity>
+                                  ))}
                                 </View>
-                              )}
+                              </View>
 
                               {/* Miqdor */}
                               <View style={{ gap: 4 }}>
@@ -684,6 +1099,26 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                                 </View>
                               </View>
 
+                              {/* Narxi — per item */}
+                              <View style={{ gap: 4, backgroundColor: "#FFFBEB", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#FDE68A" }}>
+                                <Text style={[s.fieldLabel, { color: "#92400E", marginBottom: 0 }]}>
+                                  {isD ? "Parda narxi (1 metr, so'm)" : "Eshik parda narxi (1 metr, so'm)"}
+                                </Text>
+                                <TextInput
+                                  style={[s.input, { borderColor: "#FDE68A", color: C.text, backgroundColor: "#fff", height: 42 }]}
+                                  value={item.narxi}
+                                  onChangeText={v => updateItem(room.id, item.id, { narxi: v })}
+                                  placeholder="50 000"
+                                  placeholderTextColor={C.textSecondary}
+                                  keyboardType="decimal-pad"
+                                />
+                                {fi && p(item.narxi) > 0 && (
+                                  <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: "#92400E", marginTop: 2 }}>
+                                    {m(fi.calc.jami)} × {sum(p(item.narxi))} = {sum(p(item.narxi) * fi.calc.jami)}
+                                  </Text>
+                                )}
+                              </View>
+
                               {/* Calc result */}
                               {fi && (
                                 <View style={[s.calcBox, { backgroundColor: "#fff", borderColor: itemBorder }]}>
@@ -694,6 +1129,13 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
                                     <CalcChip label="1 ta"           value={m(fi.calc.birOyna)} color={itemColor} />
                                     <CalcChip label={`${item.miqdor} ta jami`} value={m(fi.calc.jami)} color={itemColor} highlight />
                                   </View>
+                                  {p(item.narxi) > 0 && (
+                                    <View style={{ marginTop: 8, backgroundColor: "#FFFBEB", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: "#FDE68A" }}>
+                                      <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: "#92400E" }}>
+                                        {sum(p(item.narxi) * fi.calc.jami)}
+                                      </Text>
+                                    </View>
+                                  )}
                                 </View>
                               )}
                             </View>
@@ -945,13 +1387,21 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
         {/* NARX */}
         <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
           <Text style={[s.sectionLabel, { color: C.textSecondary }]}>Narx va xizmatlar</Text>
-          <Inp label="Parda narxi (1 metr, so'm)" value={narxPerMetr} onChange={setNarxPerMetr} placeholder="50 000" keyboard="decimal-pad" />
-          {narx > 0 && (
-            <View style={[s.resultRow, { backgroundColor: "#fef9c3" }]}>
-              <Text style={s.resultLbl}>Parda:</Text>
-              <Text style={[s.resultVal, { color: "#92400e" }]}>{sum(totalNarx)}</Text>
-            </View>
-          )}
+          {rooms.map((room) => {
+            const roomItems = flatItems.filter(fi => fi.room.id === room.id);
+            const rTotal = roomItems.reduce((s2, fi) => s2 + p(fi.item.narxi) * fi.calc.jami, 0);
+            if (rTotal <= 0) return null;
+            return (
+              <View key={room.id} style={{ marginBottom: 4 }}>
+                {roomItems.filter(fi => p(fi.item.narxi) > 0).map(({ item, calc }) => (
+                  <View key={item.id} style={[s.resultRow, { backgroundColor: "#fef9c3", marginBottom: 2 }]}>
+                    <Text style={s.resultLbl}>{room.name} · {item.label}: {m(calc.jami)} × {sum(p(item.narxi))}/m</Text>
+                    <Text style={[s.resultVal, { color: "#92400e" }]}>{sum(p(item.narxi) * calc.jami)}</Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })}
 
           <Text style={[s.fieldLabel, { color: C.textSecondary, marginTop: 10 }]}>O'rnatish xizmati</Text>
           <View style={{ flexDirection: "row", gap: 6 }}>
@@ -992,57 +1442,139 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
             </View>
           )}
 
-          <Inp label="Zaklat (oldindan to'lov, so'm)" value={zaklatSumma} onChange={setZaklatSumma} placeholder="0" keyboard="decimal-pad" />
-          {zaklat > 0 && (
-            <View style={[s.resultRow, { backgroundColor: qarz > 0 ? "#fef2f2" : "#f0fdf4" }]}>
-              <Text style={s.resultLbl}>Qolgan qarz:</Text>
-              <Text style={[s.resultVal, { color: qarz > 0 ? "#991b1b" : "#166534" }]}>{sum(qarz)}</Text>
+          {/* To'lov taqsimoti */}
+          {grandTotal > 0 && (
+            <View style={{ gap: 8, marginTop: 4 }}>
+              <Text style={[s.fieldLabel, { color: C.textSecondary, fontFamily: "Inter_700Bold", textTransform: "uppercase", letterSpacing: 0.5 }]}>
+                To'lov taqsimoti
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={[s.fieldLabel, { color: "#166534" }]}>💵 Naqd to'lov (so'm)</Text>
+                  <TextInput
+                    style={[s.input, { borderColor: "#22c55e", backgroundColor: "#f0fdf4", color: C.text }]}
+                    value={zaklatSumma} onChangeText={setZaklatSumma}
+                    placeholder="0" placeholderTextColor={C.textSecondary} keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{
+                  flex: 1, borderWidth: 1.5,
+                  borderColor: qarz > 0 ? "#fca5a5" : "#86efac",
+                  borderRadius: 10, padding: 10, justifyContent: "center",
+                  backgroundColor: qarz > 0 ? "#fef2f2" : "#f0fdf4",
+                }}>
+                  <Text style={{ fontSize: 9, fontFamily: "Inter_700Bold", color: qarz > 0 ? "#991b1b" : "#166534", textTransform: "uppercase" }}>
+                    {qarz > 0 ? "🔴 Qarzga" : "✅ To'liq to'langan"}
+                  </Text>
+                  <Text style={{ fontSize: 15, fontFamily: "Inter_700Bold", color: qarz > 0 ? "#dc2626" : "#16a34a", marginTop: 4 }}>
+                    {sum(qarz > 0 ? qarz : zaklat > 0 ? grandTotal : 0)}
+                  </Text>
+                </View>
+              </View>
+              {qarz > 0 && (
+                <DateInput
+                  label="Qarz qaytarish sanasi"
+                  day={qarzDay} month={qarzMonth} year={qarzYear}
+                  onChangeDay={setQarzDay} onChangeMonth={setQarzMonth} onChangeYear={setQarzYear}
+                />
+              )}
+              {qarz > 0 && qaytarishMuddati ? (
+                <View style={[s.resultRow, { backgroundColor: "#fef9c3", borderWidth: 1, borderColor: "#fde68a" }]}>
+                  <Feather name="clock" size={14} color="#92400e" />
+                  <Text style={[s.resultLbl, { color: "#92400e", flex: 1 }]}>Qarz muddati: {qaytarishMuddati}</Text>
+                </View>
+              ) : null}
             </View>
           )}
 
-          <Inp label="Tayyor bo'lish sanasi" value={tayyorKun} onChange={setTayyorKun} placeholder="Masalan: 15-dekabr" />
-          <Inp label="Qarz qaytarish muddati (YYYY-MM-DD)" value={qaytarishMuddati} onChange={setQaytarishMuddati} placeholder="Masalan: 2025-02-20" />
+          <DateInput
+            label="Tayyor bo'lish sanasi"
+            day={tayyorDay} month={tayyorMonth} year={tayyorYear}
+            onChangeDay={setTayyorDay} onChangeMonth={setTayyorMonth} onChangeYear={setTayyorYear}
+          />
         </View>
 
         {/* ISHCHILAR */}
-        {(tailors.length > 0 || installers.length > 0) && (
-          <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
-            <Text style={[s.sectionLabel, { color: C.textSecondary }]}>Telegram ishchilar</Text>
-            {tailors.length > 0 && (
-              <View style={{ gap: 4 }}>
-                <Text style={[s.fieldLabel, { color: C.textSecondary }]}>Chevar</Text>
-                {tailors.map(w => (
-                  <TouchableOpacity key={w.id}
-                    style={[s.workerRow, { borderColor: selectedTailor === w.id ? C.primary : C.border, backgroundColor: selectedTailor === w.id ? C.primary + "10" : C.card }]}
-                    onPress={() => setSelectedTailor(selectedTailor === w.id ? null : w.id)}>
-                    <Feather name="scissors" size={14} color={selectedTailor === w.id ? C.primary : C.textSecondary} />
-                    <Text style={[s.workerName, { color: C.text }]}>{w.fullName}</Text>
-                    {selectedTailor === w.id && <Feather name="check-circle" size={16} color={C.primary} />}
-                  </TouchableOpacity>
-                ))}
+        <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+          <Text style={[s.sectionLabel, { color: C.textSecondary }]}>Ishchilar va yuborish</Text>
+
+          {/* Chevar bo'limi */}
+          <View style={{ gap: 6 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" }}>
+                <Feather name="scissors" size={14} color={C.primary} />
               </View>
+              <Text style={[s.fieldLabel, { color: C.text, fontFamily: "Inter_600SemiBold", fontSize: 13, marginBottom: 0 }]}>✂️ Chevar</Text>
+            </View>
+            {tailors.length > 0 ? tailors.map(w => (
+              <TouchableOpacity key={w.id}
+                style={[s.workerRow, { borderColor: selectedTailor === w.id ? C.primary : C.border, backgroundColor: selectedTailor === w.id ? C.primary + "10" : C.card }]}
+                onPress={() => setSelectedTailor(selectedTailor === w.id ? null : w.id)}>
+                <Feather name="scissors" size={14} color={selectedTailor === w.id ? C.primary : C.textSecondary} />
+                <Text style={[s.workerName, { color: C.text }]}>{w.fullName}</Text>
+                {selectedTailor === w.id && <Feather name="check-circle" size={16} color={C.primary} />}
+              </TouchableOpacity>
+            )) : (
+              <Text style={[s.fieldLabel, { color: C.textSecondary }]}>Chevar ro'yxatdan o'tmagan</Text>
             )}
-            {installers.length > 0 && (
-              <View style={{ gap: 4, marginTop: 8 }}>
-                <Text style={[s.fieldLabel, { color: C.textSecondary }]}>O'rnatuvchi</Text>
-                {installers.map(w => (
-                  <TouchableOpacity key={w.id}
-                    style={[s.workerRow, { borderColor: selectedInstaller === w.id ? "#f97316" : C.border, backgroundColor: selectedInstaller === w.id ? "#fff7ed" : C.card }]}
-                    onPress={() => setSelectedInstaller(selectedInstaller === w.id ? null : w.id)}>
-                    <Feather name="tool" size={14} color={selectedInstaller === w.id ? "#f97316" : C.textSecondary} />
-                    <Text style={[s.workerName, { color: C.text }]}>{w.fullName}</Text>
-                    {selectedInstaller === w.id && <Feather name="check-circle" size={16} color="#f97316" />}
-                  </TouchableOpacity>
-                ))}
+            {/* Chevarga faqat razmerlar */}
+            <TouchableOpacity
+              style={[s.workerActionBtn, { backgroundColor: "#EEF2FF", borderColor: "#C7D2FE" }]}
+              onPress={shareRazmerlarToChevar} disabled={!totalJami}>
+              <Feather name="send" size={14} color={C.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.workerActionTitle, { color: C.primary }]}>✂️ Chevarga razmerlar yuborish</Text>
+                <Text style={[s.workerActionSub, { color: C.primary + "99" }]}>Faqat o'lchamlar (narxsiz)</Text>
               </View>
-            )}
-            <TouchableOpacity style={[s.telegramBtn, { opacity: sending ? 0.6 : 1 }]}
-              onPress={sendTelegram} disabled={sending}>
-              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Feather name="send" size={15} color="#fff" />}
-              <Text style={s.telegramBtnTxt}>Telegramga yuborish</Text>
+              <Feather name="chevron-right" size={15} color={C.primary} />
+            </TouchableOpacity>
+            {/* Chevar PDF */}
+            <TouchableOpacity
+              style={[s.workerActionBtn, { backgroundColor: "#F5F3FF", borderColor: "#DDD6FE" }]}
+              onPress={generateChevarPdf} disabled={pdfLoading || !totalJami}>
+              {pdfLoading ? <ActivityIndicator size="small" color="#7c3aed" /> : <Feather name="file-text" size={14} color="#7c3aed" />}
+              <View style={{ flex: 1 }}>
+                <Text style={[s.workerActionTitle, { color: "#7c3aed" }]}>📄 Chevar PDF (razmerlar)</Text>
+                <Text style={[s.workerActionSub, { color: "#7c3aed99" }]}>A5 varaqasi — saqlash va yuborish</Text>
+              </View>
+              <Feather name="chevron-right" size={15} color="#7c3aed" />
             </TouchableOpacity>
           </View>
-        )}
+
+          {/* Haydovchi/O'rnatuvchi bo'limi */}
+          <View style={{ gap: 6, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: C.border }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: "#FFF7ED", alignItems: "center", justifyContent: "center" }}>
+                <Feather name="truck" size={14} color="#EA580C" />
+              </View>
+              <Text style={[s.fieldLabel, { color: C.text, fontFamily: "Inter_600SemiBold", fontSize: 13, marginBottom: 0 }]}>🚛 Haydovchi / O'rnatuvchi</Text>
+            </View>
+            {installers.length > 0 ? installers.map(w => (
+              <TouchableOpacity key={w.id}
+                style={[s.workerRow, { borderColor: selectedInstaller === w.id ? "#f97316" : C.border, backgroundColor: selectedInstaller === w.id ? "#fff7ed" : C.card }]}
+                onPress={() => setSelectedInstaller(selectedInstaller === w.id ? null : w.id)}>
+                <Feather name="tool" size={14} color={selectedInstaller === w.id ? "#f97316" : C.textSecondary} />
+                <Text style={[s.workerName, { color: C.text }]}>{w.fullName}</Text>
+                {selectedInstaller === w.id && <Feather name="check-circle" size={16} color="#f97316" />}
+              </TouchableOpacity>
+            )) : (
+              <Text style={[s.fieldLabel, { color: C.textSecondary }]}>O'rnatuvchi ro'yxatdan o'tmagan</Text>
+            )}
+            {/* Haydovchiga lokatsiya yuborish */}
+            <TouchableOpacity
+              style={[s.workerActionBtn, { backgroundColor: "#FFF7ED", borderColor: "#FED7AA" }]}
+              onPress={sendLocationToDriver} disabled={!manzil}>
+              <Feather name="map-pin" size={14} color="#EA580C" />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.workerActionTitle, { color: "#C2410C" }]}>📍 Haydovchiga lokatsiya yuborish</Text>
+                <Text style={[s.workerActionSub, { color: "#EA580C99" }]}>
+                  {manzil ? `Google Maps havolasi bilan` : "Avval manzilni kiriting"}
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={15} color="#EA580C" />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* IZOH */}
         <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
@@ -1055,28 +1587,50 @@ ${izoh?`<div class="sec"><div class="stl">Izoh</div><p style="font-size:12px;col
 
         {/* ACTION BUTTONS */}
         <View style={{ gap: 10 }}>
+          {/* PDF — asosiy tugma */}
+          <TouchableOpacity
+            style={[s.pdfMainBtn, { opacity: pdfLoading || !totalJami ? 0.6 : 1 }]}
+            onPress={generatePdf} disabled={pdfLoading || !totalJami}>
+            {pdfLoading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Feather name="file-text" size={20} color="#fff" />}
+            <View style={{ flex: 1 }}>
+              <Text style={s.pdfMainBtnTitle}>📄 Mijoz hisob-kitob PDF</Text>
+              <Text style={s.pdfMainBtnSub}>Razmerlar, narx, manzil, to'lov holati</Text>
+            </View>
+            <Feather name="download" size={18} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
+
+          {/* Excel (CSV) eksport */}
+          <TouchableOpacity
+            style={[s.pdfMainBtn, { backgroundColor: "#16a34a", opacity: excelLoading || !totalJami ? 0.6 : 1 }]}
+            onPress={generateExcel} disabled={excelLoading || !totalJami}>
+            {excelLoading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Feather name="grid" size={20} color="#fff" />}
+            <View style={{ flex: 1 }}>
+              <Text style={s.pdfMainBtnTitle}>📊 Excel (CSV) eksport</Text>
+              <Text style={s.pdfMainBtnSub}>Barcha ma'lumotlar — razmer, narx, to'lov</Text>
+            </View>
+            <Feather name="download" size={18} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
+
+          {/* Qo'shimcha tugmalar */}
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}
-              onPress={generatePdf} disabled={pdfLoading}>
-              {pdfLoading ? <ActivityIndicator size="small" color="#3b82f6" /> : <Feather name="file-text" size={15} color="#3b82f6" />}
-              <Text style={[s.actionBtnTxt, { color: "#1d4ed8" }]}>PDF</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#F5F3FF", borderColor: "#DDD6FE" }]}
-              onPress={generateChevarPdf} disabled={pdfLoading}>
-              <Feather name="scissors" size={15} color="#7c3aed" />
-              <Text style={[s.actionBtnTxt, { color: "#6d28d9" }]}>Chevar</Text>
-            </TouchableOpacity>
             <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" }]}
               onPress={shareText}>
               <Feather name="share-2" size={15} color="#16a34a" />
-              <Text style={[s.actionBtnTxt, { color: "#15803d" }]}>Ulash</Text>
+              <Text style={[s.actionBtnTxt, { color: "#15803d" }]}>Matn ulash</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#FFF7ED", borderColor: "#FED7AA" }]}
-              onPress={sendSms} disabled={sending}>
-              {sending ? <ActivityIndicator size="small" color="#ea580c" /> : <Feather name="message-square" size={15} color="#ea580c" />}
-              <Text style={[s.actionBtnTxt, { color: "#c2410c" }]}>SMS</Text>
-            </TouchableOpacity>
+            {mijozPhone ? (
+              <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#FFF1F2", borderColor: "#FDA4AF" }]}
+                onPress={sendSms} disabled={sending}>
+                {sending ? <ActivityIndicator size="small" color="#e11d48" /> : <Feather name="send" size={15} color="#e11d48" />}
+                <Text style={[s.actionBtnTxt, { color: "#be123c" }]}>SMS yuborish</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
+
           <TouchableOpacity style={[s.bigSaveBtn, { backgroundColor: C.primary, opacity: saving ? 0.7 : 1 }]}
             onPress={saveDeal} disabled={saving}>
             {saving ? <ActivityIndicator size="small" color="#fff" /> : <Feather name="check-circle" size={18} color="#fff" />}
@@ -1217,8 +1771,13 @@ const s = StyleSheet.create({
 
   workerRow:    { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 10, padding: 11, marginBottom: 4 },
   workerName:   { flex: 1, fontSize: 13, fontFamily: "Inter_500Medium" },
-  telegramBtn:  { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#0088cc", borderRadius: 10, padding: 12, marginTop: 8 },
-  telegramBtnTxt: { color: "#fff", fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  workerActionBtn: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, padding: 12, marginTop: 4 },
+  workerActionTitle: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  workerActionSub: { fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 1 },
+
+  pdfMainBtn:   { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#2563EB", borderRadius: 14, padding: 16 },
+  pdfMainBtnTitle: { color: "#fff", fontSize: 14, fontFamily: "Inter_700Bold" },
+  pdfMainBtnSub: { color: "rgba(255,255,255,0.75)", fontSize: 11, fontFamily: "Inter_400Regular", marginTop: 2 },
 
   actionBtn:    { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderRadius: 12, padding: 13 },
   actionBtnTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold" },

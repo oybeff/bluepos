@@ -20,14 +20,21 @@ interface Shop {
   owner: { id: number; username: string; fullName: string; isActive: boolean } | null;
   userCount: number;
 }
-interface SmsSettings { smsProvider: string; eskizToken: string | null; eskizFrom: string; devsmApiKey: string | null; devsmPassword: string | null; devsmFrom?: string; }
+interface SmsSettings { smsProvider: string; eskizLogin: string | null; eskizPassword: string | null; eskizFrom: string; devsmApiKey: string | null; devsmPassword: string | null; devsmFrom?: string; }
 interface SmsLog { id: number; phone: string; matn: string; status: string; createdAt: string; }
 interface SmsTemplate { id: number; nomi: string; matn: string; tur: string; faol: boolean; }
 interface Server { id: number; name: string; url: string; description: string | null; isActive: number; isPrimary: number; lastStatus: string | null; lastChecked: string | null; }
 interface Customer { id: number; fullName: string; phone: string; address: string | null; totalDebt: number; createdAt: string; }
 interface DebtAlert { id: number; mijozIsm: string | null; mijozPhone: string | null; qarzSumma: number | null; qaytarishMuddati: string | null; status: string; }
 
-type Tab = "dokonlar" | "infratuzilma" | "sms" | "shablonlar" | "mijozlar" | "ishchilar" | "buyurtmalar";
+type Tab = "dokonlar" | "arizalar" | "infratuzilma" | "sms" | "shablonlar" | "mijozlar" | "ishchilar" | "buyurtmalar";
+type ModalType = "create" | "creds" | "topup" | "template" | "server" | "shop_sms" | "approve" | null;
+
+interface ShopRequest {
+  id: number; telegramUserId: string; telegramUsername: string | null; telegramChatId: string;
+  shopName: string; phone: string; requestedMonths: number; status: string;
+  approvedMonths: number | null; adminNote: string | null; shopId: number | null; createdAt: string;
+}
 
 type Worker = { id: number; fullName: string; phone: string | null; role: string; oylikStavka: number | null; isActive: number; activeDealCount: number; createdAt: string | null; };
 const WORKER_ROLES: Record<string, { label: string; color: string }> = {
@@ -59,7 +66,11 @@ export default function SuperAdminScreen() {
   const { user, logout } = useAuth();
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 0);
   const [activeTab, setActiveTab] = useState<Tab>("dokonlar");
-  const [modal, setModal] = useState<"create" | "creds" | "topup" | "template" | "server" | null>(null);
+  const [modal, setModal] = useState<ModalType>(null);
+  const [shopSmsForm, setShopSmsForm] = useState<Record<string, string>>({ smsProvider: "eskiz", eskizLogin: "", eskizPassword: "", eskizFrom: "4546", devsmApiKey: "", devsmFrom: "Bluepos" });
+  const [shopSmsLoading, setShopSmsLoading] = useState(false);
+  const [shopSmsTestPhone, setShopSmsTestPhone] = useState("");
+  const [shopSmsTestLoading, setShopSmsTestLoading] = useState(false);
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [editTpl, setEditTpl] = useState<SmsTemplate | null>(null);
   const [createForm, setCreateForm] = useState({ name: "", phone: "", address: "", ownerUsername: "", ownerPassword: "", ownerFullName: "" });
@@ -67,7 +78,7 @@ export default function SuperAdminScreen() {
   const [topupAmount, setTopupAmount] = useState("");
   const [tplForm, setTplForm] = useState({ nomi: "", matn: "", tur: "umumiy" });
   const [serverForm, setServerForm] = useState({ name: "", url: "", description: "" });
-  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "devsms", eskizToken: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "", devsmFrom: "Bluepos" });
+  const [smsSettingsForm, setSmsSettingsForm] = useState<Record<string, string>>({ smsProvider: "eskiz", eskizLogin: "", eskizPassword: "", eskizFrom: "4546", devsmApiKey: "", devsmPassword: "", devsmFrom: "Bluepos", telegramBotToken: "", telegramAdminChatId: "" });
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [testPhone, setTestPhone] = useState("");
@@ -75,6 +86,13 @@ export default function SuperAdminScreen() {
   const [checkingServer, setCheckingServer] = useState<number | null>(null);
   const [dealStatusFilter, setDealStatusFilter] = useState<string>("barchasi");
   const [togglingWorker, setTogglingWorker] = useState<number | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<ShopRequest | null>(null);
+  const [approveForm, setApproveForm] = useState({ months: "1", ownerUsername: "", ownerPassword: "", adminNote: "" });
+  const [rejectNote, setRejectNote] = useState("");
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [botInfo, setBotInfo] = useState<any>(null);
+  const [botInfoLoading, setBotInfoLoading] = useState(false);
+  const [settingWebhook, setSettingWebhook] = useState(false);
 
   if (user?.role !== "super_admin") {
     return (
@@ -134,16 +152,25 @@ export default function SuperAdminScreen() {
     queryFn: () => apiReq<any[]>(`/worker-panel/all-deals?status=${dealStatusFilter}`),
     enabled: activeTab === "buyurtmalar",
   });
+  const { data: shopRequests = [], isLoading: requestsLoading, refetch: refetchRequests } = useQuery<ShopRequest[]>({
+    queryKey: ["sa-shop-requests"],
+    queryFn: () => apiReq<ShopRequest[]>("/super-admin/shop-requests"),
+    enabled: activeTab === "arizalar",
+    refetchInterval: activeTab === "arizalar" ? 30000 : false,
+  });
 
   useEffect(() => {
     if (smsSettings && !settingsLoaded) {
       setSmsSettingsForm({
-        smsProvider: smsSettings.smsProvider || "devsms",
-        eskizToken: smsSettings.eskizToken || "",
+        smsProvider: smsSettings.smsProvider || "eskiz",
+        eskizLogin: smsSettings.eskizLogin || "",
+        eskizPassword: smsSettings.eskizPassword || "",
         eskizFrom: smsSettings.eskizFrom || "4546",
         devsmApiKey: smsSettings.devsmApiKey || "",
         devsmPassword: smsSettings.devsmPassword || "",
         devsmFrom: (smsSettings as any).devsmFrom || "Bluepos",
+        telegramBotToken: (smsSettings as any).telegramBotToken || "",
+        telegramAdminChatId: (smsSettings as any).telegramAdminChatId || "",
       });
       setSettingsLoaded(true);
     }
@@ -231,7 +258,228 @@ export default function SuperAdminScreen() {
     finally { setCheckingServer(null); }
   }
 
+  async function loadBotInfo() {
+    setBotInfoLoading(true);
+    try {
+      const data = await apiReq<any>("/super-admin/telegram/bot-info");
+      setBotInfo(data);
+    } catch { setBotInfo(null); }
+    finally { setBotInfoLoading(false); }
+  }
+
+  async function setWebhook() {
+    setSettingWebhook(true);
+    try {
+      const domain = await apiReq<any>("/health").catch(() => null);
+      const baseUrl = (domain as any)?.apiUrl || "";
+      const webhookUrl = `${baseUrl}/api/telegram/webhook`;
+      const res = await apiReq<any>("/super-admin/telegram/set-webhook", { method: "POST", body: JSON.stringify({ webhookUrl }) });
+      if (res?.ok) Alert.alert("✅", `Webhook o'rnatildi!\n${webhookUrl}`);
+      else Alert.alert("Xato", res?.description ?? "Noma'lum xato");
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setSettingWebhook(false); }
+  }
+
+  async function approveRequest() {
+    if (!selectedRequest) return;
+    try {
+      const res = await apiReq<any>(`/super-admin/shop-requests/${selectedRequest.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({
+          months: parseInt(approveForm.months) || 1,
+          ownerUsername: approveForm.ownerUsername || undefined,
+          ownerPassword: approveForm.ownerPassword || undefined,
+          adminNote: approveForm.adminNote || undefined,
+        }),
+      });
+      setModal(null);
+      qc.invalidateQueries({ queryKey: ["sa-shop-requests", "super-admin-shops", "super-admin-stats"] });
+      const months = parseInt(approveForm.months) || 1;
+      Alert.alert("✅ Tasdiqlandi!", `Login: ${res.username}\nParol: ${res.password}\nObuna: ${months} oy`);
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+  }
+
+  async function rejectRequest(id: number, note: string) {
+    setRejectingId(id);
+    try {
+      await apiReq(`/super-admin/shop-requests/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ adminNote: note || undefined }),
+      });
+      refetchRequests();
+      Alert.alert("✅", "Ariza rad etildi. Foydalanuvchiga xabar yuborildi.");
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setRejectingId(null); }
+  }
+
+  // ─── ARIZALAR ──────────────────────────────────────────────
+  function renderArizalar() {
+    const pending = shopRequests.filter(r => r.status === "pending");
+    const done = shopRequests.filter(r => r.status !== "pending");
+
+    const statusColor: Record<string, string> = { pending: "#F59E0B", approved: "#10B981", rejected: "#EF4444" };
+    const statusLabel: Record<string, string> = { pending: "Kutilmoqda", approved: "Tasdiqlandi", rejected: "Rad etildi" };
+    const monthLabel = (m: number) => m === 1 ? "1 oy" : m === 3 ? "3 oy" : m === 12 ? "12 oy" : `${m} oy`;
+
+    return (
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
+        {/* Stats */}
+        <View style={s.statsRow}>
+          {[
+            { lbl: "Jami arizalar", val: shopRequests.length, color: C.primary },
+            { lbl: "Kutilmoqda", val: pending.length, color: "#F59E0B" },
+            { lbl: "Tasdiqlandi", val: shopRequests.filter(r => r.status === "approved").length, color: "#10B981" },
+            { lbl: "Rad etildi", val: shopRequests.filter(r => r.status === "rejected").length, color: "#EF4444" },
+          ].map((st, i) => (
+            <View key={i} style={[s.statCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={[s.statVal, { color: st.color }]}>{st.val}</Text>
+              <Text style={[s.statLbl, { color: C.textSecondary }]}>{st.lbl}</Text>
+            </View>
+          ))}
+        </View>
+
+        {requestsLoading && <ActivityIndicator color={C.primary} />}
+
+        {/* Pending requests */}
+        {pending.length > 0 && (
+          <>
+            <Text style={[s.mLbl, { color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.8 }]}>
+              Kutilayotgan arizalar ({pending.length})
+            </Text>
+            {pending.map(r => (
+              <View key={r.id} style={[s.card, { backgroundColor: "#FFFBEB", borderColor: "#FDE68A", borderWidth: 1 }]}>
+                <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                  <View style={[s.shopDot, { backgroundColor: "#F59E0B", marginTop: 4 }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.shopName, { color: "#92400E" }]}>{r.shopName}</Text>
+                    <Text style={[s.shopMeta, { color: "#78350F" }]}>
+                      📞 {r.phone}  ·  @{r.telegramUsername ?? r.telegramUserId}
+                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+                      <View style={{ backgroundColor: "#FEF3C7", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                        <Text style={{ color: "#D97706", fontFamily: "Inter_600SemiBold", fontSize: 12 }}>
+                          ⏳ So'ralgan: {monthLabel(r.requestedMonths)}
+                        </Text>
+                      </View>
+                      <Text style={[s.shopMeta, { color: C.textSecondary }]}>{ago(r.createdAt)}</Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={[s.shopActions, { borderTopColor: "#FDE68A", marginTop: 10 }]}>
+                  <TouchableOpacity style={[s.actionBtn, { backgroundColor: "#D1FAE5", flex: 1 }]}
+                    onPress={() => {
+                      setSelectedRequest(r);
+                      setApproveForm({ months: String(r.requestedMonths), ownerUsername: "", ownerPassword: "", adminNote: "" });
+                      setModal("approve");
+                    }}>
+                    <Feather name="check-circle" size={15} color="#059669" />
+                    <Text style={[s.actionBtnTxt, { color: "#059669" }]}>Tasdiqlash</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.actionBtn, { backgroundColor: "#FEE2E2", flex: 1 }]}
+                    onPress={() => Alert.alert("Rad etish", `"${r.shopName}" arizasini rad etmoqchimisiz?`, [
+                      { text: "Bekor" },
+                      { text: "Rad etish", style: "destructive", onPress: () => rejectRequest(r.id, "") },
+                    ])}
+                    disabled={rejectingId === r.id}>
+                    {rejectingId === r.id
+                      ? <ActivityIndicator color="#DC2626" size="small" />
+                      : <><Feather name="x-circle" size={15} color="#DC2626" /><Text style={[s.actionBtnTxt, { color: "#DC2626" }]}>Rad</Text></>
+                    }
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {/* Done requests */}
+        {done.length > 0 && (
+          <>
+            <Text style={[s.mLbl, { color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 8 }]}>
+              Ko'rib chiqilganlar
+            </Text>
+            {done.map(r => (
+              <View key={r.id} style={[s.shopCard, { backgroundColor: C.card, borderColor: C.border }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={[s.shopDot, { backgroundColor: statusColor[r.status] ?? "#6B7280" }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.shopName, { color: C.text }]}>{r.shopName}</Text>
+                    <Text style={[s.shopMeta, { color: C.textSecondary }]}>
+                      📞 {r.phone}  ·  @{r.telegramUsername ?? r.telegramUserId}
+                    </Text>
+                  </View>
+                  <View>
+                    <View style={{ backgroundColor: r.status === "approved" ? "#D1FAE5" : "#FEE2E2", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                      <Text style={{ color: statusColor[r.status] ?? "#6B7280", fontSize: 11, fontFamily: "Inter_600SemiBold" }}>
+                        {statusLabel[r.status] ?? r.status}
+                      </Text>
+                    </View>
+                    {r.status === "approved" && r.approvedMonths && (
+                      <Text style={{ color: C.textSecondary, fontSize: 11, marginTop: 2, textAlign: "right" }}>
+                        {monthLabel(r.approvedMonths)}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {shopRequests.length === 0 && !requestsLoading && (
+          <View style={[s.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="inbox" size={32} color={C.textSecondary} />
+            <Text style={[s.emptyTxt, { color: C.textSecondary }]}>Hali ariza yo'q</Text>
+            <Text style={[s.shopMeta, { color: C.textSecondary, textAlign: "center", marginTop: 4 }]}>
+              Telegram bot orqali do'kon egalari ariza yuborsa shu yerda ko'rinadi
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
+  async function openShopSms(shop: Shop) {
+    setSelectedShop(shop);
+    setShopSmsTestPhone("");
+    setShopSmsLoading(true);
+    try {
+      const data = await apiReq<Record<string, string>>(`/super-admin/shops/${shop.id}/sms-settings`);
+      setShopSmsForm({
+        smsProvider: data.smsProvider || "eskiz",
+        eskizLogin: data.eskizLogin || "",
+        eskizPassword: data.eskizPassword || "",
+        eskizFrom: data.eskizFrom || "4546",
+        devsmApiKey: data.devsmApiKey || "",
+        devsmFrom: data.devsmFrom || "Bluepos",
+      });
+    } catch { /* use defaults */ }
+    finally { setShopSmsLoading(false); }
+    setModal("shop_sms");
+  }
+
+  async function saveShopSms() {
+    if (!selectedShop) return;
+    setShopSmsLoading(true);
+    try {
+      await apiReq(`/super-admin/shops/${selectedShop.id}/sms-settings`, { method: "PATCH", body: JSON.stringify(shopSmsForm) });
+      Alert.alert("✅", "Do'kon SMS sozlamalari saqlandi!");
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setShopSmsLoading(false); }
+  }
+
+  async function testShopSms() {
+    if (!selectedShop || !shopSmsTestPhone) return;
+    setShopSmsTestLoading(true);
+    try {
+      const res = await apiReq<any>(`/super-admin/shops/${selectedShop.id}/test-sms`, { method: "POST", body: JSON.stringify({ phone: shopSmsTestPhone }) });
+      Alert.alert(res.success ? "✅ Test SMS yuborildi!" : "❌ Xato", res.success ? `${shopSmsTestPhone} ga yuborildi` : (res.error || "Noma'lum xato"));
+    } catch (e: any) { Alert.alert("Xato", e.message); }
+    finally { setShopSmsTestLoading(false); }
+  }
+
   const provider = smsSettingsForm.smsProvider;
+  const shopSmsProvider = shopSmsForm.smsProvider;
 
   // ─── DO'KONLAR ─────────────────────────────────────────────
   function renderDokonlar() {
@@ -279,6 +527,11 @@ export default function SuperAdminScreen() {
                 onPress={() => { setSelectedShop(shop); setCredsForm({ username: shop.owner?.username || "", password: "" }); setModal("creds"); }}>
                 <Feather name="key" size={15} color={C.primary} />
                 <Text style={[s.actionBtnTxt, { color: C.primary }]}>Login</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.actionBtn, { backgroundColor: "#F0F9FF" }]}
+                onPress={() => openShopSms(shop)}>
+                <Feather name="message-circle" size={15} color="#0284C7" />
+                <Text style={[s.actionBtnTxt, { color: "#0284C7" }]}>SMS</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[s.actionBtn, { backgroundColor: shop.isActive ? "#FEE2E2" : "#D1FAE5" }]}
                 onPress={() => Alert.alert(shop.isActive ? "Bloklash" : "Ochish", `"${shop.name}" ni ${shop.isActive ? "bloklamoqchi" : "faollashtirishni"} istaysizmi?`, [
@@ -429,8 +682,13 @@ export default function SuperAdminScreen() {
             </>
           ) : (
             <>
-              <SmsField label="Eskiz Token" value={smsSettingsForm.eskizToken ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizToken: v }))} placeholder="Bearer token..." />
-              <SmsField label="Yuboruvchi nomi" value={smsSettingsForm.eskizFrom ?? "4546"} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizFrom: v }))} placeholder="4546" />
+              <View style={[s.infoBanner, { backgroundColor: "#EEF2FF" }]}>
+                <Feather name="info" size={13} color="#6366F1" />
+                <Text style={[s.infoBannerTxt, { color: "#6366F1" }]}>notify.eskiz.uz dan ro'yxatdan o'ting va email/parolni kiriting.</Text>
+              </View>
+              <SmsField label="Eskiz Email (login)" value={smsSettingsForm.eskizLogin ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizLogin: v }))} placeholder="email@example.com" />
+              <SmsField label="Eskiz Parol" value={smsSettingsForm.eskizPassword ?? ""} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizPassword: v }))} placeholder="Parol..." secure />
+              <SmsField label="Yuboruvchi ID (from)" value={smsSettingsForm.eskizFrom ?? "4546"} onChange={v => setSmsSettingsForm(f => ({ ...f, eskizFrom: v }))} placeholder="4546" />
             </>
           )}
 
@@ -450,6 +708,60 @@ export default function SuperAdminScreen() {
               {testLoading ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={16} color="#fff" />}
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Telegram Bot Settings */}
+        <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: "#0088CC22", alignItems: "center", justifyContent: "center" }}>
+              <Feather name="send" size={14} color="#0088CC" />
+            </View>
+            <Text style={[s.cardTitle, { color: C.text, marginBottom: 0 }]}>Telegram Bot</Text>
+          </View>
+
+          <View style={[s.infoBanner, { backgroundColor: "#E0F2FE" }]}>
+            <Feather name="info" size={13} color="#0284C7" />
+            <Text style={[s.infoBannerTxt, { color: "#0284C7" }]}>
+              @BotFather dan bot yarating, tokenni va admin chat ID sini kiriting. Do'kon egalari /start orqali ariza yuboradi.
+            </Text>
+          </View>
+
+          <SmsField label="Bot Token" value={smsSettingsForm.telegramBotToken ?? ""}
+            onChange={v => setSmsSettingsForm(f => ({ ...f, telegramBotToken: v }))}
+            placeholder="1234567890:AAF..." secure />
+          <SmsField label="Admin Chat ID" value={smsSettingsForm.telegramAdminChatId ?? ""}
+            onChange={v => setSmsSettingsForm(f => ({ ...f, telegramAdminChatId: v }))}
+            placeholder="-100123456789 yoki 123456789" />
+
+          <TouchableOpacity style={[s.saveBtn, { backgroundColor: savingSettings ? C.border : "#0284C7", marginBottom: 8 }]}
+            onPress={saveSettings} disabled={savingSettings}>
+            {savingSettings ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.saveBtnTxt}>Bot sozlamalarini saqlash</Text>}
+          </TouchableOpacity>
+
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#EEF2FF", paddingVertical: 10, justifyContent: "center" }]}
+              onPress={loadBotInfo} disabled={botInfoLoading}>
+              {botInfoLoading ? <ActivityIndicator color={C.primary} size="small" />
+                : <><Feather name="user" size={14} color={C.primary} /><Text style={[s.actionBtnTxt, { color: C.primary }]}>Bot ma'lumoti</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: "#F0FDF4", paddingVertical: 10, justifyContent: "center" }]}
+              onPress={setWebhook} disabled={settingWebhook}>
+              {settingWebhook ? <ActivityIndicator color="#059669" size="small" />
+                : <><Feather name="link" size={14} color="#059669" /><Text style={[s.actionBtnTxt, { color: "#059669" }]}>Webhook ulash</Text></>}
+            </TouchableOpacity>
+          </View>
+
+          {botInfo?.result && (
+            <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: "#F0FDF4" }}>
+              <Text style={{ color: "#166534", fontFamily: "Inter_600SemiBold" }}>✅ Bot ulangan</Text>
+              <Text style={{ color: "#166534", fontSize: 12 }}>@{botInfo.result.username} — {botInfo.result.first_name}</Text>
+            </View>
+          )}
+          {botInfo && !botInfo.result && (
+            <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: "#FEF2F2" }}>
+              <Text style={{ color: "#DC2626", fontSize: 12 }}>❌ Bot ulanmagan. Token to'g'riligini tekshiring.</Text>
+            </View>
+          )}
         </View>
 
         <View style={[s.card, { backgroundColor: C.card, borderColor: C.border }]}>
@@ -850,23 +1162,32 @@ export default function SuperAdminScreen() {
         contentContainerStyle={s.tabs}>
         {[
           { key: "dokonlar" as Tab,     lbl: "Do'konlar",    icon: "shopping-bag" as const },
+          { key: "arizalar" as Tab,     lbl: "Arizalar",     icon: "inbox" as const, badge: shopRequests.filter(r => r.status === "pending").length },
           { key: "infratuzilma" as Tab, lbl: "Infratuzilma", icon: "server" as const },
           { key: "buyurtmalar" as Tab,  lbl: "Buyurtmalar",  icon: "list" as const },
           { key: "ishchilar" as Tab,    lbl: "Ishchilar",    icon: "users" as const },
           { key: "mijozlar" as Tab,     lbl: "Mijozlar",     icon: "user" as const },
-          { key: "sms" as Tab,          lbl: "DevSMS",       icon: "message-square" as const },
+          { key: "sms" as Tab,          lbl: "SMS/Bot",      icon: "message-square" as const },
           { key: "shablonlar" as Tab,   lbl: "Shablonlar",   icon: "message-circle" as const },
         ].map(t => (
           <TouchableOpacity key={t.key}
             style={[s.tabBtn, activeTab === t.key && { borderBottomWidth: 2.5, borderBottomColor: C.primary }]}
             onPress={() => setActiveTab(t.key)}>
-            <Feather name={t.icon} size={14} color={activeTab === t.key ? C.primary : C.textSecondary} />
+            <View style={{ position: "relative" }}>
+              <Feather name={t.icon} size={14} color={activeTab === t.key ? C.primary : C.textSecondary} />
+              {(t as any).badge > 0 && (
+                <View style={{ position: "absolute", top: -4, right: -6, backgroundColor: "#EF4444", borderRadius: 6, width: 12, height: 12, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ color: "#fff", fontSize: 8, fontFamily: "Inter_700Bold" }}>{(t as any).badge}</Text>
+                </View>
+              )}
+            </View>
             <Text style={[s.tabBtnTxt, { color: activeTab === t.key ? C.primary : C.textSecondary }]}>{t.lbl}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
       {activeTab === "dokonlar" && renderDokonlar()}
+      {activeTab === "arizalar" && renderArizalar()}
       {activeTab === "infratuzilma" && renderInfratuzilma()}
       {activeTab === "sms" && renderSms()}
       {activeTab === "shablonlar" && renderShablonlar()}
@@ -954,6 +1275,119 @@ export default function SuperAdminScreen() {
             {serverCreateMut.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Qo'shish</Text>}
           </TouchableOpacity>
         </View>
+      </MModal>
+
+      {/* ─── Approve Shop Request Modal ─── */}
+      <MModal visible={modal === "approve"} title={`Tasdiqlash: ${selectedRequest?.shopName ?? ""}`} onClose={() => setModal(null)}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
+          <View style={{ gap: 14 }}>
+            {selectedRequest && (
+              <View style={{ backgroundColor: "#F0FDF4", borderRadius: 10, padding: 12, gap: 4 }}>
+                <Text style={{ color: "#166534", fontFamily: "Inter_600SemiBold" }}>📌 {selectedRequest.shopName}</Text>
+                <Text style={{ color: "#166534", fontSize: 13 }}>📞 {selectedRequest.phone}</Text>
+                <Text style={{ color: "#166534", fontSize: 13 }}>
+                  👤 @{selectedRequest.telegramUsername ?? selectedRequest.telegramUserId}
+                </Text>
+                <Text style={{ color: "#166534", fontSize: 13 }}>
+                  ⏳ So'ralgan: {selectedRequest.requestedMonths === 1 ? "1 oy" : selectedRequest.requestedMonths === 3 ? "3 oy" : `${selectedRequest.requestedMonths} oy`}
+                </Text>
+              </View>
+            )}
+
+            {/* Subscription months selector */}
+            <View style={{ gap: 6 }}>
+              <Text style={[s.mLbl, { color: C.textSecondary }]}>Obuna muddati (tasdiqlash)</Text>
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  { val: "1", lbl: "1 oy" },
+                  { val: "3", lbl: "3 oy" },
+                  { val: "12", lbl: "12 oy" },
+                ].map(opt => (
+                  <TouchableOpacity key={opt.val}
+                    style={{ flex: 1, minWidth: 70, paddingVertical: 10, borderRadius: 8, alignItems: "center",
+                      backgroundColor: approveForm.months === opt.val ? C.primary : C.surface,
+                      borderWidth: 1, borderColor: approveForm.months === opt.val ? C.primary : C.border }}
+                    onPress={() => setApproveForm(f => ({ ...f, months: opt.val }))}>
+                    <Text style={{ color: approveForm.months === opt.val ? "#fff" : C.text, fontFamily: "Inter_700Bold", fontSize: 14 }}>
+                      {opt.lbl}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <SmsField label="Login (ixtiyoriy)" value={approveForm.ownerUsername}
+              onChange={v => setApproveForm(f => ({ ...f, ownerUsername: v }))} placeholder="pardaplus_admin (avtomatik)" />
+            <SmsField label="Parol (ixtiyoriy)" value={approveForm.ownerPassword}
+              onChange={v => setApproveForm(f => ({ ...f, ownerPassword: v }))} placeholder="(avtomatik yaratiladi)" secure />
+            <SmsField label="Izoh (ixtiyoriy)" value={approveForm.adminNote}
+              onChange={v => setApproveForm(f => ({ ...f, adminNote: v }))} placeholder="Foydalanuvchiga izoh..." />
+
+            <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: C.primary }]} onPress={approveRequest}>
+              <Feather name="check-circle" size={16} color="#fff" />
+              <Text style={s.modalSaveBtnTxt}>Tasdiqlash va do'kon ochish</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </MModal>
+
+      {/* ─── Per-shop SMS Settings Modal ─── */}
+      <MModal visible={modal === "shop_sms"} title={`SMS: ${selectedShop?.name ?? ""}`} onClose={() => setModal(null)}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
+          <View style={{ gap: 14 }}>
+            {shopSmsLoading && <ActivityIndicator color={C.primary} />}
+
+            {/* Provider selector */}
+            <View style={{ gap: 6 }}>
+              <Text style={[s.mLbl, { color: C.textSecondary }]}>SMS Provayder</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {[{ key: "eskiz", lbl: "Eskiz.uz" }, { key: "devsms", lbl: "DevSMS.uz" }].map(p => (
+                  <TouchableOpacity key={p.key}
+                    style={[s.actionBtn, { flex: 1, justifyContent: "center", paddingVertical: 10,
+                      backgroundColor: shopSmsProvider === p.key ? C.primary : C.surface,
+                      borderWidth: 1, borderColor: shopSmsProvider === p.key ? C.primary : C.border }]}
+                    onPress={() => setShopSmsForm(f => ({ ...f, smsProvider: p.key }))}>
+                    <Text style={{ color: shopSmsProvider === p.key ? "#fff" : C.text, fontFamily: "Inter_600SemiBold", fontSize: 13 }}>
+                      {p.lbl}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Eskiz fields */}
+            {shopSmsProvider === "eskiz" && (
+              <>
+                <SmsField label="Eskiz Email" value={shopSmsForm.eskizLogin} onChange={v => setShopSmsForm(f => ({ ...f, eskizLogin: v }))} placeholder="email@example.com" />
+                <SmsField label="Eskiz Parol" value={shopSmsForm.eskizPassword} onChange={v => setShopSmsForm(f => ({ ...f, eskizPassword: v }))} placeholder="••••••••" secure />
+                <SmsField label="From ID (sender name)" value={shopSmsForm.eskizFrom} onChange={v => setShopSmsForm(f => ({ ...f, eskizFrom: v }))} placeholder="4546" />
+              </>
+            )}
+
+            {/* DevSMS fields */}
+            {shopSmsProvider === "devsms" && (
+              <>
+                <SmsField label="DevSMS API Kalit (Bearer)" value={shopSmsForm.devsmApiKey} onChange={v => setShopSmsForm(f => ({ ...f, devsmApiKey: v }))} placeholder="API key..." secure />
+                <SmsField label="Yuboruvchi nomi" value={shopSmsForm.devsmFrom} onChange={v => setShopSmsForm(f => ({ ...f, devsmFrom: v }))} placeholder="Bluepos" />
+              </>
+            )}
+
+            {/* Save */}
+            <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: shopSmsLoading ? C.border : C.primary }]}
+              onPress={saveShopSms} disabled={shopSmsLoading}>
+              {shopSmsLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Saqlash</Text>}
+            </TouchableOpacity>
+
+            {/* Test SMS */}
+            <View style={[s.divider, { borderTopColor: C.border, marginVertical: 4 }]} />
+            <Text style={[s.dividerLbl, { color: C.textSecondary }]}>SINOV SMS</Text>
+            <SmsField label="Test telefon raqami" value={shopSmsTestPhone} onChange={setShopSmsTestPhone} placeholder="+998901234567" />
+            <TouchableOpacity style={[s.modalSaveBtn, { backgroundColor: shopSmsTestLoading || !shopSmsTestPhone ? C.border : "#059669" }]}
+              onPress={testShopSms} disabled={shopSmsTestLoading || !shopSmsTestPhone}>
+              {shopSmsTestLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.modalSaveBtnTxt}>Test SMS yuborish</Text>}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </MModal>
     </View>
   );

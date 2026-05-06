@@ -84,6 +84,11 @@ export default function StatistikaScreen() {
     queryFn: () => apiReq<any>("/client-deals?limit=10"),
     retry: false,
   });
+  const { data: qarzStats } = useQuery<{ olindiJami: number; berildiJami: number }>({
+    queryKey: ["qarz-daftar-stats"],
+    queryFn: () => apiReq("/qarz-daftar/stats"),
+    retry: false,
+  });
   const deals: Deal[] = Array.isArray(dealsRaw) ? dealsRaw : (dealsRaw as any)?.deals ?? [];
 
   const onRefresh = useCallback(async () => {
@@ -92,6 +97,7 @@ export default function StatistikaScreen() {
       qc.invalidateQueries({ queryKey: ["finance-month"] }),
       qc.invalidateQueries({ queryKey: ["finance-today"] }),
       qc.invalidateQueries({ queryKey: ["deals-recent"] }),
+      qc.invalidateQueries({ queryKey: ["qarz-daftar-stats"] }),
     ]);
     setRefreshing(false);
   }, [qc]);
@@ -165,6 +171,19 @@ export default function StatistikaScreen() {
               <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm chiqim</Text>
             </View>
           </View>
+          {(qarzStats?.olindiJami || qarzStats?.berildiJami) ? (
+            <View style={[st.todayRow, { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }]}>
+              <View style={st.todayCol}>
+                <Text style={[st.bigNum, { color: "#10B981", fontSize: 16 }]}>+{n(qarzStats?.olindiJami ?? 0)}</Text>
+                <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm olindi</Text>
+              </View>
+              <View style={[st.sep, { backgroundColor: C.border }]} />
+              <View style={st.todayCol}>
+                <Text style={[st.bigNum, { color: "#EF4444", fontSize: 16 }]}>-{n(qarzStats?.berildiJami ?? 0)}</Text>
+                <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm berildi</Text>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         {/* ─── Tez harakatlar ───────────────────────────────────── */}

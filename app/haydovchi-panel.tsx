@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
+import { useRouter } from "expo-router";
 import { apiReq } from "@/lib/api";
 import { useAuth } from "@/context/auth";
 
@@ -51,6 +52,7 @@ function fmt(n?: number | null) {
 export default function HaydovchiPanel() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const router = useRouter();
   const { logout, user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [changing, setChanging] = useState<number | null>(null);
@@ -320,6 +322,22 @@ export default function HaydovchiPanel() {
                   </View>
                 </View>
               </View>
+
+              {/* Shaxsiy xarajatlar button */}
+              <TouchableOpacity
+                style={[s.expensesBtn, { backgroundColor: C.card, borderColor: "#4F46E520" }]}
+                onPress={() => router.push("/(tabs)/shaxsiy-xarajatlar")}
+                activeOpacity={0.7}
+              >
+                <View style={[s.expensesBtnIcon, { backgroundColor: "#EEF2FF" }]}>
+                  <Feather name="credit-card" size={20} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.expensesBtnTitle, { color: C.text }]}>Shaxsiy xarajatlar</Text>
+                  <Text style={[s.expensesBtnSub, { color: C.textSecondary }]}>Oylik, avanslar va xarajatlar</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={C.textSecondary} />
+              </TouchableOpacity>
             </>
           ) : (
             <View style={s.empty}>
@@ -498,6 +516,16 @@ const s = StyleSheet.create({
   activeItem: { flex: 1, alignItems: "center", paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, gap: 4 },
   activeNum: { fontSize: 24, fontFamily: "Inter_700Bold" },
   activeLbl: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  expensesBtn: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    borderRadius: 16, borderWidth: 1, padding: 14,
+  },
+  expensesBtnIcon: {
+    width: 44, height: 44, borderRadius: 12,
+    alignItems: "center", justifyContent: "center",
+  },
+  expensesBtnTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
+  expensesBtnSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
 });
 
 const dc = StyleSheet.create({

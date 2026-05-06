@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiReq } from "@/lib/api";
 import Colors from "@/constants/colors";
+import DateInput, { buildDateStr } from "@/components/DateInput";
 
 const C = Colors.light;
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
@@ -70,7 +71,9 @@ export default function MijozScreen() {
   const [manzil, setManzil] = useState("");
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
-  const [tayyorKun, setTayyorKun] = useState("");
+  const [tayyorDay, setTayyorDay] = useState("");
+  const [tayyorMonth, setTayyorMonth] = useState("");
+  const [tayyorYear, setTayyorYear] = useState("");
 
   // Oynas
   const [oynaList, setOynaList] = useState<Oyna[]>([newOyna()]);
@@ -169,7 +172,7 @@ export default function MijozScreen() {
         chevarJami,
         zaklatSumma: zaklatSumma,
         qarzSumma,
-        tayyorBolishKuni: tayyorKun || null,
+        tayyorBolishKuni: buildDateStr(tayyorDay, tayyorMonth, tayyorYear) || null,
         tailorWorkerId: tailorId,
         installerWorkerId: installerId,
         totalNarxFull: grandTotal,
@@ -208,7 +211,7 @@ export default function MijozScreen() {
 
   function resetForm() {
     setStep("info");
-    setIsm(""); setTel(""); setManzil(""); setGpsCoords(null); setTayyorKun("");
+    setIsm(""); setTel(""); setManzil(""); setGpsCoords(null); setTayyorDay(""); setTayyorMonth(""); setTayyorYear("");
     setOynaList([newOyna()]); setNarx("80000");
     setOrnatish(""); setChevar("5000");
     setTailorId(null); setInstallerId(null); setZaklat("");
@@ -365,8 +368,11 @@ export default function MijozScreen() {
                 📍 {gpsCoords.lat.toFixed(5)}, {gpsCoords.lng.toFixed(5)}
               </Text>
             )}
-            <SLabel>Tayyor bo'lish kuni</SLabel>
-            <SInput value={tayyorKun} onChange={setTayyorKun} placeholder="2026-04-20" />
+            <DateInput
+              label="Tayyor bo'lish kuni"
+              day={tayyorDay} month={tayyorMonth} year={tayyorYear}
+              onChangeDay={setTayyorDay} onChangeMonth={setTayyorMonth} onChangeYear={setTayyorYear}
+            />
           </View>
           </View>
         )}
@@ -537,7 +543,7 @@ export default function MijozScreen() {
               {ism ? <InfoRow icon="user" label={ism} /> : null}
               {tel ? <InfoRow icon="phone" label={tel} /> : null}
               {manzil ? <InfoRow icon="map-pin" label={manzil} /> : null}
-              {tayyorKun ? <InfoRow icon="calendar" label={`Tayyor: ${tayyorKun}`} /> : null}
+              {buildDateStr(tayyorDay, tayyorMonth, tayyorYear) ? <InfoRow icon="calendar" label={`Tayyor: ${buildDateStr(tayyorDay, tayyorMonth, tayyorYear)}`} /> : null}
               <InfoRow icon="layers" label={`${oynaList.length} oyna, jami ${totalMat.toFixed(2)} m²`} />
               {tailorId && <InfoRow icon="scissors" label={`Chevar: ${workers.find((w: any) => w.id === tailorId)?.fullName || "?"}`} />}
               {installerId && <InfoRow icon="tool" label={`Ustа: ${workers.find((w: any) => w.id === installerId)?.fullName || "?"}`} />}

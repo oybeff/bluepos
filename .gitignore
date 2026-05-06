@@ -17,3 +17,13 @@ web-build/
 
 expo-env.d.ts
 # @end expo-cli
+
+# OS
+.DS_Store
+
+# Playwright MCP
+.playwright-mcp/
+
+# Test screenshots
+*.png
+!assets/**/*.png

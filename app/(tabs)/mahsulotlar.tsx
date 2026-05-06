@@ -12,7 +12,7 @@ import { useLocalSearchParams } from "expo-router";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/auth";
 import { apiReq } from "@/lib/api";
-import { printBarcodeLabel } from "@/lib/printer";
+import { printBarcodeLabel, BarcodePaperSize } from "@/lib/printer";
 
 const C = Colors.light;
 const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
@@ -619,6 +619,196 @@ const addSt = StyleSheet.create({
   nextText: { color: "#fff", fontSize: 15, fontFamily: "Inter_700Bold" },
 });
 
+// ─── Edit Product Modal ────────────────────────────────────────────────────
+function EditProductModal({ visible, product, categories, onClose, onSaved }: {
+  visible: boolean; product: Product | null; categories: Category[]; onClose: () => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: "", category: "", unit: "metr", barcode: "",
+    buyingPrice: "", pricePerUnit: "", stock: "", minStock: "",
+    description: "", pachkaHajmi: "1", rang: "", material: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const selectableCats = categories.filter(c => !c.isAll);
+
+  useEffect(() => {
+    if (product && visible) {
+      setForm({
+        name: product.name || "",
+        category: product.category || "",
+        unit: product.unit || "metr",
+        barcode: product.barcode || "",
+        buyingPrice: product.buyingPrice ? String(product.buyingPrice) : "",
+        pricePerUnit: product.pricePerUnit ? String(product.pricePerUnit) : "",
+        stock: product.stock ? String(product.stock) : "",
+        minStock: product.minStock ? String(product.minStock) : "",
+        description: product.description || "",
+        pachkaHajmi: product.pachkaHajmi ? String(product.pachkaHajmi) : "1",
+        rang: product.rang || "",
+        material: product.material || "",
+      });
+    }
+  }, [product, visible]);
+
+  async function handleSave() {
+    if (!form.name.trim()) { Alert.alert("Xato", "Mahsulot nomini kiriting"); return; }
+    if (!form.pricePerUnit) { Alert.alert("Xato", "Sotish narxini kiriting"); return; }
+    if (!product) return;
+    setSaving(true);
+    try {
+      await apiReq(`/products/${product.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: form.name.trim(),
+          category: form.category || (selectableCats[0]?.key || "boshqa"),
+          unit: form.unit,
+          barcode: form.barcode || undefined,
+          buyingPrice: parseFloat(form.buyingPrice) || 0,
+          pricePerUnit: parseFloat(form.pricePerUnit),
+          stock: parseFloat(form.stock) || 0,
+          minStock: parseFloat(form.minStock) || 0,
+          description: form.description || undefined,
+          pachkaHajmi: parseFloat(form.pachkaHajmi) || 1,
+          rang: form.rang || undefined,
+          material: form.material || undefined,
+        }),
+      });
+      Alert.alert("✓ Saqlandi", `"${form.name}" yangilandi`);
+      onSaved(); onClose();
+    } catch (e: any) {
+      Alert.alert("Xato", e.message || "Saqlashda xato");
+    } finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!product) return;
+    Alert.alert(
+      "O'chirish",
+      `"${product.name}" mahsulotni o'chirishni xohlaysizmi?`,
+      [
+        { text: "Bekor", style: "cancel" },
+        {
+          text: "O'chirish", style: "destructive", onPress: async () => {
+            setDeleting(true);
+            try {
+              await apiReq(`/products/${product.id}`, { method: "DELETE" });
+              Alert.alert("✓ O'chirildi", `"${product.name}" o'chirildi`);
+              onSaved(); onClose();
+            } catch (e: any) {
+              Alert.alert("Xato", e.message || "O'chirishda xato");
+            } finally { setDeleting(false); }
+          },
+        },
+      ]
+    );
+  }
+
+  const inp = [addSt.input, { backgroundColor: C.card, borderColor: C.border, color: C.text }];
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[addSt.container, { backgroundColor: C.background }]}>
+          <View style={[addSt.header, { borderBottomColor: C.border }]}>
+            <Text style={[addSt.title, { color: C.text }]}>Mahsulotni tahrirlash</Text>
+            <TouchableOpacity onPress={onClose}><Feather name="x" size={22} color={C.textSecondary} /></TouchableOpacity>
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={addSt.body}>
+            <View>
+              <Text style={[addSt.label, { color: C.textSecondary }]}>Mahsulot nomi *</Text>
+              <TextInput style={inp} value={form.name} onChangeText={v => set("name", v)} placeholder="Nom" placeholderTextColor={C.textSecondary} />
+            </View>
+            <View>
+              <Text style={[addSt.label, { color: C.textSecondary }]}>Kategoriya</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {selectableCats.map(cat => (
+                    <TouchableOpacity key={cat.key} onPress={() => set("category", cat.key)}
+                      style={[addSt.chip, {
+                        backgroundColor: form.category === cat.key ? C.primary : C.card,
+                        borderColor: form.category === cat.key ? C.primary : C.border,
+                      }]}>
+                      <Text style={{ fontSize: 16 }}>{cat.emoji}</Text>
+                      <Text style={[addSt.chipText, { color: form.category === cat.key ? "#fff" : C.text }]}>{cat.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+            <View>
+              <Text style={[addSt.label, { color: C.textSecondary }]}>O'lchov birligi</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {UNITS.map(u => (
+                    <TouchableOpacity key={u.value} onPress={() => set("unit", u.value)}
+                      style={[addSt.unitChip, {
+                        backgroundColor: form.unit === u.value ? C.primary : C.card,
+                        borderColor: form.unit === u.value ? C.primary : C.border,
+                      }]}>
+                      <Text style={[addSt.chipText, { color: form.unit === u.value ? "#fff" : C.text, fontSize: 13 }]}>{u.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+            <View style={addSt.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Rang</Text>
+                <TextInput style={inp} value={form.rang} onChangeText={v => set("rang", v)} placeholder="Oq, ko'k..." placeholderTextColor={C.textSecondary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Material</Text>
+                <TextInput style={inp} value={form.material} onChangeText={v => set("material", v)} placeholder="PVC, Metall..." placeholderTextColor={C.textSecondary} />
+              </View>
+            </View>
+            <View style={addSt.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Kelgan narx</Text>
+                <TextInput style={inp} value={form.buyingPrice} onChangeText={v => set("buyingPrice", v)} placeholder="0" placeholderTextColor={C.textSecondary} keyboardType="numeric" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Sotish narxi *</Text>
+                <TextInput style={[inp, { borderColor: C.primary }]} value={form.pricePerUnit} onChangeText={v => set("pricePerUnit", v)} placeholder="0" placeholderTextColor={C.textSecondary} keyboardType="numeric" />
+              </View>
+            </View>
+            <View style={addSt.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Joriy zaxira</Text>
+                <TextInput style={inp} value={form.stock} onChangeText={v => set("stock", v)} placeholder="0" placeholderTextColor={C.textSecondary} keyboardType="numeric" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[addSt.label, { color: C.textSecondary }]}>Minimal zaxira</Text>
+                <TextInput style={inp} value={form.minStock} onChangeText={v => set("minStock", v)} placeholder="0" placeholderTextColor={C.textSecondary} keyboardType="numeric" />
+              </View>
+            </View>
+            <View>
+              <Text style={[addSt.label, { color: C.textSecondary }]}>Izoh</Text>
+              <TextInput style={[inp, { height: 60, textAlignVertical: "top", paddingTop: 10 }]}
+                value={form.description} onChangeText={v => set("description", v)}
+                placeholder="Qo'shimcha..." placeholderTextColor={C.textSecondary} multiline />
+            </View>
+          </ScrollView>
+          <View style={[addSt.footer, { borderTopColor: C.border }]}>
+            <TouchableOpacity onPress={handleDelete} disabled={deleting}
+              style={[addSt.cancelBtn, { borderColor: "#EF4444" }]}>
+              {deleting ? <ActivityIndicator size="small" color="#EF4444" />
+                : <><Feather name="trash-2" size={16} color="#EF4444" /><Text style={{ color: "#EF4444", fontFamily: "Inter_500Medium", fontSize: 14, marginLeft: 4 }}>O'chirish</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSave} disabled={saving}
+              style={[addSt.nextBtn, { backgroundColor: C.primary, opacity: saving ? 0.7 : 1 }]}>
+              {saving ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={addSt.nextText}>✓ Saqlash</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ─── Main Products Screen ───────────────────────────────────────────────────
 export default function MahsulotlarScreen() {
   const insets = useSafeAreaInsets();
@@ -632,9 +822,11 @@ export default function MahsulotlarScreen() {
   const [initialBarcode, setInitialBarcode] = useState<string | undefined>();
   const [printProduct, setPrintProduct] = useState<Product | null>(null);
   const [printCount, setPrintCount] = useState("1");
+  const [printPaper, setPrintPaper] = useState<BarcodePaperSize>("58mm");
   const [printing, setPrinting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     if (params.addBarcode) {
@@ -650,12 +842,14 @@ export default function MahsulotlarScreen() {
     queryFn: () => apiReq("/categories"),
   });
 
-  const { data: rawProducts, isLoading, refetch: refetchProducts } = useQuery<Product[]>({
+  const { data: rawProducts, isLoading, refetch: refetchProducts } = useQuery({
     queryKey: ["products-list"],
-    queryFn: () => apiReq<Product[]>("/products?limit=500"),
+    queryFn: () => apiReq<{ products: Product[]; total: number } | Product[]>("/products?limit=500"),
   });
 
-  const products: Product[] = Array.isArray(rawProducts) ? rawProducts : [];
+  const products: Product[] = Array.isArray(rawProducts)
+    ? rawProducts
+    : (rawProducts as any)?.products ?? [];
 
   const getCatInfo = (key: string) => {
     const cat = categories.find(c => c.key === key);
@@ -746,18 +940,31 @@ export default function MahsulotlarScreen() {
           )}
         </View>
 
-        {/* Print barcode button */}
-        <TouchableOpacity
-          onPress={() => { setPrintProduct(p); setPrintCount("1"); }}
-          style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8,
-            paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1,
-            borderColor: C.border, alignSelf: "flex-start" }}
-        >
-          <Feather name="printer" size={13} color={C.primary} />
-          <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: C.primary }}>
-            Barcode chiqarish
-          </Text>
-        </TouchableOpacity>
+        {/* Action buttons */}
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <TouchableOpacity
+            onPress={() => setEditProduct(p)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6,
+              paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1,
+              borderColor: C.primary, backgroundColor: C.primary + "10" }}
+          >
+            <Feather name="edit-2" size={13} color={C.primary} />
+            <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: C.primary }}>
+              Tahrirlash
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => { setPrintProduct(p); setPrintCount("1"); }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6,
+              paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1,
+              borderColor: C.border }}
+          >
+            <Feather name="printer" size={13} color={C.primary} />
+            <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: C.primary }}>
+              Barcode chiqarish
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -772,6 +979,13 @@ export default function MahsulotlarScreen() {
         categories={categories}
         initialBarcode={initialBarcode}
         onClose={() => { setShowAddProduct(false); setInitialBarcode(undefined); }}
+        onSaved={() => { qc.invalidateQueries({ queryKey: ["products-list"] }); refetchProducts(); }}
+      />
+      <EditProductModal
+        visible={!!editProduct}
+        product={editProduct}
+        categories={categories}
+        onClose={() => setEditProduct(null)}
         onSaved={() => { qc.invalidateQueries({ queryKey: ["products-list"] }); refetchProducts(); }}
       />
 
@@ -817,6 +1031,28 @@ export default function MahsulotlarScreen() {
                 keyboardType="numeric" placeholder="Boshqa son..." placeholderTextColor={C.textSecondary}
               />
             </View>
+            <View>
+              <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: C.textSecondary, marginBottom: 8 }}>
+                Qog'oz o'lchami
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {([
+                  { key: "58mm" as const, label: "58 mm", desc: "Chek" },
+                  { key: "80mm" as const, label: "80 mm", desc: "Standart" },
+                  { key: "a4" as const, label: "A4", desc: "Katta" },
+                ] as const).map(p => (
+                  <TouchableOpacity key={p.key} onPress={() => setPrintPaper(p.key)}
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, alignItems: "center",
+                      borderColor: printPaper === p.key ? C.primary : C.border,
+                      backgroundColor: printPaper === p.key ? C.primary + "15" : C.card }}>
+                    <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold",
+                      color: printPaper === p.key ? C.primary : C.text }}>{p.label}</Text>
+                    <Text style={{ fontSize: 10, fontFamily: "Inter_400Regular",
+                      color: printPaper === p.key ? C.primary : C.textSecondary }}>{p.desc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
             {!printProduct?.barcode && (
               <View style={{ flexDirection: "row", gap: 8, backgroundColor: "#FFFBEB", borderRadius: 10, padding: 10 }}>
                 <Feather name="alert-triangle" size={14} color="#D97706" />
@@ -836,7 +1072,7 @@ export default function MahsulotlarScreen() {
                   if (!printProduct) return;
                   setPrinting(true);
                   try {
-                    await printBarcodeLabel(printProduct, parseInt(printCount) || 1);
+                    await printBarcodeLabel(printProduct, parseInt(printCount) || 1, printPaper);
                   } catch (e: any) {
                     Alert.alert("Xato", e.message || "Chop etishda xato");
                   } finally {

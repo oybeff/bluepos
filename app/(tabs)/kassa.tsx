@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, RefreshControl, Platform, Modal,
+  FlatList, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -36,6 +37,15 @@ interface KassaShift {
   transactions: KassaTransaction[];
 }
 
+interface DebtAlert {
+  id: number;
+  mijozIsm: string | null;
+  mijozPhone: string | null;
+  qarzSumma: number;
+  qaytarishMuddati: string | null;
+  status: "muddati_otgan" | "yaqinlashmoqda";
+}
+
 const KATEGORIYALAR = ["savdo", "kirim", "chiqim", "ish haqi", "ijara", "ta'mirlash", "umumiy"];
 
 function fmt(n: number): string {
@@ -46,24 +56,27 @@ function fmtTime(d: string): string {
   return new Date(d).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtDate(d: string | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 export default function KassaScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
+  const [showDebtModal, setShowDebtModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const topPadding = insets.top + (Platform.OS === "web" ? 67 : 0);
   const bottomPadding = insets.bottom + (Platform.OS === "web" ? 90 : 100);
 
-  // Transaction form
   const [txnTur, setTxnTur] = useState<"kirim" | "chiqim">("kirim");
   const [txnTolov, setTxnTolov] = useState<"naqd" | "plastik">("naqd");
   const [txnSumma, setTxnSumma] = useState("");
   const [txnTavsif, setTxnTavsif] = useState("");
   const [txnKategoriya, setTxnKategoriya] = useState("savdo");
-
-  // Open shift form
   const [boshlanishQoldiq, setBoshlanishQoldiq] = useState("0");
 
   const { data: shift, isLoading } = useQuery<KassaShift | null>({
@@ -72,11 +85,60 @@ export default function KassaScreen() {
     refetchInterval: 30000,
   });
 
+  const { data: debtAlerts = [] } = useQuery<DebtAlert[]>({
+    queryKey: ["debt-alerts-kassa"],
+    queryFn: () => apiReq<DebtAlert[]>("/notifications/debt-alerts"),
+    refetchInterval: 60000,
+  });
+
+  const { data: hisobKitoblar = [], refetch: refetchHisob } = useQuery<any[]>({
+    queryKey: ["hisob-kitoblar-kassa"],
+    queryFn: () => apiReq<any[]>("/hisob-kitob"),
+    refetchInterval: 60000,
+  });
+  const pendingHisob = hisobKitoblar.filter((h: any) => h.status === "hisoblangan");
+
+  const totalDebt = debtAlerts.reduce((s, d) => s + (d.qarzSumma || 0), 0);
+  const overdueCount = debtAlerts.filter(d => d.status === "muddati_otgan").length;
+  const nearCount = debtAlerts.filter(d => d.status === "yaqinlashmoqda").length;
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await qc.invalidateQueries({ queryKey: ["kassa-current"] });
+    await qc.invalidateQueries({ queryKey: ["debt-alerts-kassa"] });
+    await qc.invalidateQueries({ queryKey: ["hisob-kitoblar-kassa"] });
     setRefreshing(false);
   }, [qc]);
+
+  const handleAddHisobToKassa = async (hisob: any) => {
+    if (!shift) {
+      Alert.alert("Shift ochiq emas", "Avval shift oching");
+      return;
+    }
+    setLoading(true);
+    try {
+      const turLabel: Record<string, string> = { xona: "Xona parda", parda: "Parda", dike: "Dike", jalousie: "Jalousie", karniiz: "Karniiz" };
+      await apiReq("/kassa/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          shiftId: shift.id,
+          tur: "kirim",
+          tolov: "naqd",
+          summa: parseFloat(hisob.totalNarx) || 0,
+          tavsif: `${turLabel[hisob.tur] ?? hisob.tur} sotuvi${hisob.mijozIsm ? ` — ${hisob.mijozIsm}` : ""}`,
+          kategoriya: "savdo",
+          hisobKitobId: hisob.id,
+        }),
+      });
+      await qc.invalidateQueries({ queryKey: ["kassa-current"] });
+      await qc.invalidateQueries({ queryKey: ["hisob-kitoblar-kassa"] });
+      Alert.alert("✅ Kirim qo'shildi", `${fmt(parseFloat(hisob.totalNarx))} kassaga kirim sifatida qo'shildi`);
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleOpenShift = async () => {
     setLoading(true);
@@ -98,7 +160,7 @@ export default function KassaScreen() {
   const handlePrintShift = async () => {
     if (!shift) return;
     try {
-      const fmtDate = (d: string) => new Date(d).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      const fmtDate2 = (d: string) => new Date(d).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
       const fmtN = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0));
       const txns = shift.transactions || [];
       const naqdKirim = txns.filter((t: any) => t.tur === "kirim" && t.tolov === "naqd").reduce((s: number, t: any) => s + t.summa, 0);
@@ -121,8 +183,8 @@ export default function KassaScreen() {
 <div class="sub">KASSA SMENA XISOBOTI</div>
 <hr>
 <div class="row"><span>Smena #${shift.id}</span><span>${shift.status === "ochiq" ? "OCHIQ" : "YOPIQ"}</span></div>
-<div class="row"><span>Ochildi:</span><span>${fmtDate(shift.ochilganSana)}</span></div>
-${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(shift.yopilganSana)}</span></div>` : ""}
+<div class="row"><span>Ochildi:</span><span>${fmtDate2(shift.ochilganSana)}</span></div>
+${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate2(shift.yopilganSana)}</span></div>` : ""}
 <hr>
 <div class="row"><span>Boshlang'ich:</span><span>${fmtN(shift.boshlanishQoldiq)} so'm</span></div>
 <div class="row"><span>Naqd kirim:</span><span>${fmtN(naqdKirim)} so'm</span></div>
@@ -216,11 +278,38 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
         )}
       </View>
 
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: bottomPadding, gap: 14 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
+        keyboardShouldPersistTaps="handled"
       >
         {isLoading && <ActivityIndicator color={C.primary} style={{ marginTop: 40 }} />}
+
+        {/* ─── MIJOZ QARZLARI BANNER ─── */}
+        {debtAlerts.length > 0 && (
+          <TouchableOpacity
+            style={[s.debtBanner, { backgroundColor: overdueCount > 0 ? "#FEF2F2" : "#FFF7ED", borderColor: overdueCount > 0 ? "#FECACA" : "#FED7AA" }]}
+            onPress={() => setShowDebtModal(true)}
+            activeOpacity={0.85}
+          >
+            <View style={[s.debtBannerIcon, { backgroundColor: overdueCount > 0 ? "#FEE2E2" : "#FFEDD5" }]}>
+              <Feather name="alert-circle" size={20} color={overdueCount > 0 ? "#DC2626" : "#EA580C"} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.debtBannerTitle, { color: overdueCount > 0 ? "#991B1B" : "#9A3412" }]}>
+                {overdueCount > 0 ? `⛔ ${overdueCount} ta muddati o'tgan qarz` : `⚠️ ${nearCount} ta qarz yaqinlashmoqda`}
+              </Text>
+              <Text style={[s.debtBannerSub, { color: overdueCount > 0 ? "#DC2626" : "#EA580C" }]}>
+                Jami: {fmt(totalDebt)} · {debtAlerts.length} ta mijoz
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Text style={[s.debtBannerLink, { color: overdueCount > 0 ? "#DC2626" : "#EA580C" }]}>Ko'rish</Text>
+              <Feather name="chevron-right" size={16} color={overdueCount > 0 ? "#DC2626" : "#EA580C"} />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {!isLoading && !shift && (
           <View style={s.emptyState}>
@@ -236,6 +325,48 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
               <Feather name="play" size={18} color="#fff" />
               <Text style={s.openBtnTxt}>Shift ochish</Text>
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ─── HISOB-KITOBLAR (KUTAYOTGAN SOTUV) ─── */}
+        {pendingHisob.length > 0 && (
+          <View style={{ gap: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={[s.sectionTitle, { color: C.text, marginBottom: 0 }]}>
+                📋 Hisob-kitoblar ({pendingHisob.length} ta)
+              </Text>
+              <Text style={{ fontSize: 11, color: C.textSecondary, fontFamily: "Inter_500Medium" }}>
+                Jami: {fmt(pendingHisob.reduce((s: number, h: any) => s + parseFloat(h.totalNarx || 0), 0))}
+              </Text>
+            </View>
+            {pendingHisob.map((hisob: any) => {
+              const turLabels: Record<string, string> = { xona: "🏠 Xona", parda: "🪟 Parda", dike: "🌀 Dike", jalousie: "🎯 Jalousie", karniiz: "🔩 Karniiz" };
+              return (
+                <View key={hisob.id} style={[s.txnCard, { backgroundColor: "#F0FDF4", borderColor: "#86EFAC" }]}>
+                  <View style={[s.txnIcon, { backgroundColor: "#DCFCE7" }]}>
+                    <Feather name="file-text" size={16} color="#16A34A" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.txnTavsif, { color: C.text }]}>
+                      {turLabels[hisob.tur] ?? hisob.tur}
+                      {hisob.mijozIsm ? ` — ${hisob.mijozIsm}` : ""}
+                    </Text>
+                    <Text style={[s.txnMeta, { color: C.textSecondary }]}>
+                      {hisob.mijozPhone ? `📞 ${hisob.mijozPhone} · ` : ""}{new Date(hisob.createdAt).toLocaleDateString("uz-UZ")}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end", gap: 4 }}>
+                    <Text style={[s.txnAmount, { color: "#16A34A" }]}>+{fmt(parseFloat(hisob.totalNarx || 0))}</Text>
+                    <TouchableOpacity
+                      onPress={() => handleAddHisobToKassa(hisob)}
+                      style={{ backgroundColor: "#16A34A", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}
+                    >
+                      <Text style={{ fontSize: 11, color: "#fff", fontFamily: "Inter_600SemiBold" }}>Kassaga kirim</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -301,19 +432,84 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
           </>
         )}
       </ScrollView>
+      </TouchableWithoutFeedback>
+
+      {/* ─── DEBT MODAL ─── */}
+      <Modal visible={showDebtModal} animationType="slide" transparent onRequestClose={() => setShowDebtModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalBox, { backgroundColor: C.surface, maxHeight: "85%" }]}>
+            <View style={s.modalHeader}>
+              <View>
+                <Text style={[s.modalTitle, { color: C.text }]}>Mijoz qarzlari</Text>
+                <Text style={{ fontSize: 12, color: "#DC2626", fontFamily: "Inter_500Medium" }}>
+                  Jami: {fmt(totalDebt)} · {debtAlerts.length} ta
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowDebtModal(false)}>
+                <Feather name="x" size={22} color={C.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={debtAlerts}
+              keyExtractor={i => i.id.toString()}
+              contentContainerStyle={{ gap: 10, paddingTop: 8, paddingBottom: 20 }}
+              renderItem={({ item: d }) => {
+                const isOver = d.status === "muddati_otgan";
+                return (
+                  <View style={[s.debtCard, {
+                    backgroundColor: isOver ? "#FEF2F2" : "#FFF7ED",
+                    borderColor: isOver ? "#FECACA" : "#FED7AA",
+                  }]}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <View style={[s.debtAvatarCircle, { backgroundColor: isOver ? "#FEE2E2" : "#FFEDD5" }]}>
+                        <Feather name="user" size={16} color={isOver ? "#DC2626" : "#EA580C"} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.debtCardName, { color: C.text }]}>{d.mijozIsm || "Noma'lum"}</Text>
+                        {d.mijozPhone && (
+                          <Text style={[s.debtCardPhone, { color: C.textSecondary }]}>{d.mijozPhone}</Text>
+                        )}
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={[s.debtCardAmount, { color: isOver ? "#DC2626" : "#EA580C" }]}>
+                          {fmt(d.qarzSumma)}
+                        </Text>
+                        <View style={[s.debtStatusBadge, { backgroundColor: isOver ? "#FEE2E2" : "#FFEDD5" }]}>
+                          <Text style={[s.debtStatusTxt, { color: isOver ? "#991B1B" : "#9A3412" }]}>
+                            {isOver ? "⛔ Muddati o'tgan" : "⚠️ Yaqinlashmoqda"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    {d.qaytarishMuddati && (
+                      <View style={[s.debtMuddat, { borderTopColor: isOver ? "#FECACA" : "#FED7AA" }]}>
+                        <Feather name="calendar" size={12} color={isOver ? "#DC2626" : "#EA580C"} />
+                        <Text style={[s.debtMuddatTxt, { color: isOver ? "#DC2626" : "#EA580C" }]}>
+                          Qaytarish muddati: {fmtDate(d.qaytarishMuddati)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* Transaction Modal */}
       <Modal visible={showModal} animationType="slide" transparent>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={s.modalOverlay}>
           <View style={[s.modalBox, { backgroundColor: C.surface }]}>
             <View style={s.modalHeader}>
               <Text style={[s.modalTitle, { color: C.text }]}>{txnTur === "kirim" ? "Kirim qo'shish" : "Chiqim qo'shish"}</Text>
-              <TouchableOpacity onPress={() => setShowModal(false)}>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowModal(false); }}>
                 <Feather name="x" size={22} color={C.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            {/* Tur toggle */}
             <View style={s.toggleRow}>
               {(["kirim", "chiqim"] as const).map(t => (
                 <TouchableOpacity key={t} onPress={() => setTxnTur(t)}
@@ -325,7 +521,6 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
               ))}
             </View>
 
-            {/* To'lov turi */}
             <View style={s.toggleRow}>
               {(["naqd", "plastik"] as const).map(t => (
                 <TouchableOpacity key={t} onPress={() => setTxnTolov(t)}
@@ -353,7 +548,6 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
               onChangeText={setTxnTavsif}
             />
 
-            {/* Kategoriya */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
               <View style={{ flexDirection: "row", gap: 6 }}>
                 {KATEGORIYALAR.map(k => (
@@ -373,15 +567,19 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
             </TouchableOpacity>
           </View>
         </View>
+        </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* Open Shift Modal */}
       <Modal visible={showOpenModal} animationType="slide" transparent>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={s.modalOverlay}>
           <View style={[s.modalBox, { backgroundColor: C.surface }]}>
             <View style={s.modalHeader}>
               <Text style={[s.modalTitle, { color: C.text }]}>Shift ochish</Text>
-              <TouchableOpacity onPress={() => setShowOpenModal(false)}>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setShowOpenModal(false); }}>
                 <Feather name="x" size={22} color={C.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -405,6 +603,8 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate(sh
             </TouchableOpacity>
           </View>
         </View>
+        </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -416,6 +616,23 @@ const s = StyleSheet.create({
   title: { fontSize: 24, fontFamily: "Inter_700Bold", color: C.text },
   closeShiftBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FEE2E2", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
   closeShiftTxt: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: "#DC2626" },
+
+  debtBanner: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1.5, borderRadius: 14, padding: 14 },
+  debtBannerIcon: { width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  debtBannerTitle: { fontSize: 13, fontFamily: "Inter_700Bold" },
+  debtBannerSub: { fontSize: 12, fontFamily: "Inter_500Medium", marginTop: 2 },
+  debtBannerLink: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+
+  debtCard: { borderWidth: 1.5, borderRadius: 14, padding: 14, gap: 0 },
+  debtAvatarCircle: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  debtCardName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  debtCardPhone: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  debtCardAmount: { fontSize: 16, fontFamily: "Inter_700Bold" },
+  debtStatusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4 },
+  debtStatusTxt: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+  debtMuddat: { flexDirection: "row", alignItems: "center", gap: 6, borderTopWidth: 1, marginTop: 10, paddingTop: 10 },
+  debtMuddatTxt: { fontSize: 12, fontFamily: "Inter_500Medium" },
+
   emptyState: { alignItems: "center", gap: 12, paddingVertical: 60 },
   emptyIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
   emptyTitle: { fontSize: 20, fontFamily: "Inter_600SemiBold" },

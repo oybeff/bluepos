@@ -5,14 +5,17 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useCallback } from "react";
+import { Alert, Platform } from "react-native";
+import * as Updates from "expo-updates";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { setBaseUrl } from "@/lib/api-client";
+import { queryClient } from "@/lib/query-client";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/auth";
@@ -24,7 +27,7 @@ if (process.env.EXPO_PUBLIC_DOMAIN) {
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+// queryClient imported from @/lib/query-client
 
 // Public routes that don't require authentication
 const PUBLIC_ROUTES = ["/", "/login", "/register", "/register-pending"];
@@ -47,7 +50,25 @@ function AuthGuard() {
   return null;
 }
 
+function useOTAUpdates() {
+  const checkForUpdate = useCallback(async () => {
+    if (__DEV__) return;
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        await Updates.fetchUpdateAsync();
+        await Updates.reloadAsync();
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    checkForUpdate();
+  }, [checkForUpdate]);
+}
+
 function RootLayoutNav() {
+  useOTAUpdates();
   return (
     <>
       <AuthGuard />
