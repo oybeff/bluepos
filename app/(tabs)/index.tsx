@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
 import { useAuth } from "@/context/auth";
+import { fmtDateWeekday, fmtNum } from "../../lib/date-utils";
 
 const C = Colors.light;
 
@@ -22,9 +23,9 @@ interface Deal {
   totalNarx: number | null; status: string; createdAt: string;
 }
 
-function n(v: number) { return new Intl.NumberFormat("uz-UZ").format(Math.round(v)); }
+function n(v: number) { return fmtNum(Math.round(v)); }
 function todayStr() {
-  return new Date().toLocaleDateString("uz-UZ", { weekday: "long", day: "numeric", month: "long" });
+  return fmtDateWeekday(new Date());
 }
 function ago(d: string) {
   const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
@@ -41,6 +42,7 @@ const STATUS_CFG: Record<string, { l: string; c: string; bg: string }> = {
   tayyor:       { l: "Tayyor",       c: "#10B981", bg: "#ECFDF5" },
   ornatilmoqda: { l: "O'rnatilmoqda",c: "#F59E0B", bg: "#FFFBEB" },
   yopildi:      { l: "Yopildi",      c: "#64748B", bg: "#F1F5F9" },
+  bekor:        { l: "Bekor",        c: "#DC2626", bg: "#FEE2E2" },
 };
 
 export default function StatistikaScreen() {
@@ -89,6 +91,11 @@ export default function StatistikaScreen() {
     queryFn: () => apiReq("/qarz-daftar/stats"),
     retry: false,
   });
+  const { data: expensesData } = useQuery({
+    queryKey: ["worker-expenses-summary"],
+    queryFn: () => apiReq<{ kassaDeductions: number; totalShaxsiy: number; netRemaining: number }>("/worker-panel/expenses/summary"),
+    retry: false,
+  });
   const deals: Deal[] = Array.isArray(dealsRaw) ? dealsRaw : (dealsRaw as any)?.deals ?? [];
 
   const onRefresh = useCallback(async () => {
@@ -98,10 +105,13 @@ export default function StatistikaScreen() {
       qc.invalidateQueries({ queryKey: ["finance-today"] }),
       qc.invalidateQueries({ queryKey: ["deals-recent"] }),
       qc.invalidateQueries({ queryKey: ["qarz-daftar-stats"] }),
+      qc.invalidateQueries({ queryKey: ["worker-expenses-summary"] }),
+      qc.invalidateQueries({ queryKey: ["notif-count"] }),
     ]);
     setRefreshing(false);
   }, [qc]);
 
+  const isSeller = user?.role === "seller";
   const monthIncome  = monthTxns.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const monthExpense = monthTxns.filter(t => t.type === "expense" || t.type === "salary").reduce((s, t) => s + t.amount, 0);
   const todayIncome  = todayTxns.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
@@ -160,143 +170,233 @@ export default function StatistikaScreen() {
         {/* ─── Bugungi savdo ────────────────────────────────────── */}
         <View style={[st.todayCard, { backgroundColor: C.card }]}>
           <Text style={[st.sec, { color: C.textSecondary }]}>Bugun</Text>
-          <View style={st.todayRow}>
-            <View style={st.todayCol}>
-              <Text style={[st.bigNum, { color: "#10B981" }]}>{n(todayIncome)}</Text>
-              <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm kirim</Text>
-            </View>
-            <View style={[st.sep, { backgroundColor: C.border }]} />
-            <View style={st.todayCol}>
-              <Text style={[st.bigNum, { color: "#EF4444" }]}>{n(todayExpense)}</Text>
-              <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm chiqim</Text>
-            </View>
-          </View>
-          {(qarzStats?.olindiJami || qarzStats?.berildiJami) ? (
-            <View style={[st.todayRow, { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }]}>
+          {isSeller ? (
+            <View style={st.todayRow}>
               <View style={st.todayCol}>
-                <Text style={[st.bigNum, { color: "#10B981", fontSize: 16 }]}>+{n(qarzStats?.olindiJami ?? 0)}</Text>
-                <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm olindi</Text>
-              </View>
-              <View style={[st.sep, { backgroundColor: C.border }]} />
-              <View style={st.todayCol}>
-                <Text style={[st.bigNum, { color: "#EF4444", fontSize: 16 }]}>-{n(qarzStats?.berildiJami ?? 0)}</Text>
-                <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm berildi</Text>
+                <Text style={[st.bigNum, { color: "#4F46E5" }]}>{n(todayIncome)}</Text>
+                <Text style={[st.smallLbl, { color: C.textSecondary }]}>bugungi savdo</Text>
               </View>
             </View>
-          ) : null}
+          ) : (
+            <>
+              <View style={st.todayRow}>
+                <View style={st.todayCol}>
+                  <Text style={[st.bigNum, { color: "#10B981" }]}>{n(todayIncome)}</Text>
+                  <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm kirim</Text>
+                </View>
+                <View style={[st.sep, { backgroundColor: C.border }]} />
+                <View style={st.todayCol}>
+                  <Text style={[st.bigNum, { color: "#EF4444" }]}>{n(todayExpense)}</Text>
+                  <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm chiqim</Text>
+                </View>
+              </View>
+              {(qarzStats?.olindiJami || qarzStats?.berildiJami) ? (
+                <View style={[st.todayRow, { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }]}>
+                  <View style={st.todayCol}>
+                    <Text style={[st.bigNum, { color: "#10B981", fontSize: 16 }]}>+{n(qarzStats?.olindiJami ?? 0)}</Text>
+                    <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm olindi</Text>
+                  </View>
+                  <View style={[st.sep, { backgroundColor: C.border }]} />
+                  <View style={st.todayCol}>
+                    <Text style={[st.bigNum, { color: "#EF4444", fontSize: 16 }]}>-{n(qarzStats?.berildiJami ?? 0)}</Text>
+                    <Text style={[st.smallLbl, { color: C.textSecondary }]}>so'm berildi</Text>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          )}
         </View>
 
         {/* ─── Tez harakatlar ───────────────────────────────────── */}
         <View style={st.statSection}>
           <Text style={[st.sec, { color: C.textSecondary }]}>Tez harakatlar</Text>
-          {/* Row 1 */}
-          <View style={st.quickRow}>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EEF2FF" }]} onPress={() => router.push("/new-deal" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#4F46E5" }]}>
-                <Feather name="plus-circle" size={18} color="#fff" />
+          {isSeller ? (
+            <>
+              <View style={st.quickRow}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF0F0" }]} onPress={() => router.push("/(tabs)/sotuv" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#EF4444" }]}>
+                    <Feather name="shopping-cart" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#EF4444" }]}>Sotuv</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0FDF4" }]} onPress={() => router.push("/scanner" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
+                    <Feather name="maximize" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#059669" }]}>Skaner</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EEF2FF" }]} onPress={() => router.push("/new-deal" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#4F46E5" }]}>
+                    <Feather name="plus-circle" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#4F46E5" }]}>Buyurtma</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0F9FF" }]} onPress={() => router.push("/(tabs)/mahsulotlar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#0EA5E9" }]}>
+                    <Feather name="box" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#0EA5E9" }]}>Mahsulotlar</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[st.quickLabel, { color: "#4F46E5" }]}>Buyurtma</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0FDF4" }]} onPress={() => router.push("/scanner" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
-                <Feather name="maximize" size={18} color="#fff" />
+              <View style={[st.quickRow, { marginTop: 8 }]}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/(tabs)/davomat" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#10B981" }]}>
+                    <Feather name="user-check" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#10B981" }]}>Davomat</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EFF6FF" }]} onPress={() => router.push("/(tabs)/mijozlar")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#3B82F6" }]}>
+                    <Feather name="users" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#3B82F6" }]}>Mijozlar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/calculator")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
+                    <Feather name="hash" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Hisob</Text>
+                </TouchableOpacity>
+                <View style={{ flex: 1 }} />
               </View>
-              <Text style={[st.quickLabel, { color: "#059669" }]}>Skaner</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/kassa")}>
-              <View style={[st.quickIcon, { backgroundColor: "#F59E0B" }]}>
-                <Feather name="unlock" size={18} color="#fff" />
+            </>
+          ) : (
+            <>
+              <View style={st.quickRow}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EEF2FF" }]} onPress={() => router.push("/new-deal" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#4F46E5" }]}>
+                    <Feather name="plus-circle" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#4F46E5" }]}>Buyurtma</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0FDF4" }]} onPress={() => router.push("/scanner" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
+                    <Feather name="maximize" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#059669" }]}>Skaner</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/kassa")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#F59E0B" }]}>
+                    <Feather name="unlock" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#F59E0B" }]}>Kassa</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F5F3FF" }]} onPress={() => router.push("/(tabs)/ombor-harakati")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#7C3AED" }]}>
+                    <Feather name="package" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#7C3AED" }]}>Ombor</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[st.quickLabel, { color: "#F59E0B" }]}>Kassa</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F5F3FF" }]} onPress={() => router.push("/(tabs)/ombor-harakati")}>
-              <View style={[st.quickIcon, { backgroundColor: "#7C3AED" }]}>
-                <Feather name="package" size={18} color="#fff" />
+              <View style={[st.quickRow, { marginTop: 8 }]}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF0F0" }]} onPress={() => router.push("/(tabs)/sotuv" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#EF4444" }]}>
+                    <Feather name="shopping-cart" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#EF4444" }]}>Sotuv</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FEF2F2" }]} onPress={() => router.push("/(tabs)/shaxsiy-xarajatlar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#DC2626" }]}>
+                    <Feather name="trending-down" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#DC2626" }]}>Rasxodlar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0F9FF" }]} onPress={() => router.push("/(tabs)/mahsulotlar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#0EA5E9" }]}>
+                    <Feather name="box" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#0EA5E9" }]}>Mahsulotlar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/(tabs)/davomat" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#10B981" }]}>
+                    <Feather name="user-check" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#10B981" }]}>Davomat</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[st.quickLabel, { color: "#7C3AED" }]}>Ombor</Text>
-            </TouchableOpacity>
-          </View>
-          {/* Row 2 - Products */}
-          <View style={[st.quickRow, { marginTop: 8 }]}>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF0F0" }]} onPress={() => router.push("/(tabs)/sotuv" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#EF4444" }]}>
-                <Feather name="shopping-cart" size={18} color="#fff" />
+              <View style={[st.quickRow, { marginTop: 8 }]}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FDF4FF" }]} onPress={() => router.push("/(tabs)/hisobot" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#A855F7" }]}>
+                    <Feather name="bar-chart-2" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#A855F7" }]}>Hisobot</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/(tabs)/kanban" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
+                    <Feather name="trello" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#059669" }]}>Kanban</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/jadval" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#EA580C" }]}>
+                    <Feather name="calendar" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#EA580C" }]}>Jadval</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/qarz-daftar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
+                    <Feather name="book" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Qarz daftar</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[st.quickLabel, { color: "#EF4444" }]}>Sotuv</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F0F9FF" }]} onPress={() => router.push("/(tabs)/mahsulotlar" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#0EA5E9" }]}>
-                <Feather name="box" size={18} color="#fff" />
+              <View style={[st.quickRow, { marginTop: 8 }]}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/invoice")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#F59E0B" }]}>
+                    <Feather name="file-text" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#F59E0B" }]}>Faktura</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FDF2F8" }]} onPress={() => router.push("/(tabs)/lidlar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#EC4899" }]}>
+                    <Feather name="heart" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#EC4899" }]}>Lidlar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EFF6FF" }]} onPress={() => router.push("/(tabs)/mijozlar")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#3B82F6" }]}>
+                    <Feather name="users" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#3B82F6" }]}>Mijozlar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F5F3FF" }]} onPress={() => router.push("/(tabs)/xodimlar" as any)}>
+                  <View style={[st.quickIcon, { backgroundColor: "#8B5CF6" }]}>
+                    <Feather name="user-check" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#8B5CF6" }]}>Xodimlar</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[st.quickLabel, { color: "#0EA5E9" }]}>Mahsulotlar</Text>
-            </TouchableOpacity>
-          </View>
-          {/* Row 3 */}
-          <View style={[st.quickRow, { marginTop: 8 }]}>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FDF4FF" }]} onPress={() => router.push("/(tabs)/hisobot" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#A855F7" }]}>
-                <Feather name="bar-chart-2" size={18} color="#fff" />
+              <View style={[st.quickRow, { marginTop: 8 }]}>
+                <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/calculator")}>
+                  <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
+                    <Feather name="hash" size={18} color="#fff" />
+                  </View>
+                  <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Hisob</Text>
+                </TouchableOpacity>
+                <View style={{ flex: 1 }} />
+                <View style={{ flex: 1 }} />
+                <View style={{ flex: 1 }} />
               </View>
-              <Text style={[st.quickLabel, { color: "#A855F7" }]}>Hisobot</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#ECFDF5" }]} onPress={() => router.push("/(tabs)/kanban" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#059669" }]}>
-                <Feather name="trello" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#059669" }]}>Kanban</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/jadval" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#EA580C" }]}>
-                <Feather name="calendar" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#EA580C" }]}>Jadval</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/qarz-daftar" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
-                <Feather name="book" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Qarz daftar</Text>
-            </TouchableOpacity>
-          </View>
-          {/* Row 3 */}
-          <View style={[st.quickRow, { marginTop: 8 }]}>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF7ED" }]} onPress={() => router.push("/(tabs)/invoice")}>
-              <View style={[st.quickIcon, { backgroundColor: "#F59E0B" }]}>
-                <Feather name="file-text" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#F59E0B" }]}>Faktura</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#FFF1F2" }]} onPress={() => router.push("/(tabs)/calculator")}>
-              <View style={[st.quickIcon, { backgroundColor: "#F43F5E" }]}>
-                <Feather name="hash" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#F43F5E" }]}>Hisob</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#EFF6FF" }]} onPress={() => router.push("/(tabs)/mijozlar")}>
-              <View style={[st.quickIcon, { backgroundColor: "#3B82F6" }]}>
-                <Feather name="users" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#3B82F6" }]}>Mijozlar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[st.quickCard, { backgroundColor: "#F5F3FF" }]} onPress={() => router.push("/(tabs)/xodimlar" as any)}>
-              <View style={[st.quickIcon, { backgroundColor: "#8B5CF6" }]}>
-                <Feather name="user-check" size={18} color="#fff" />
-              </View>
-              <Text style={[st.quickLabel, { color: "#8B5CF6" }]}>Xodimlar</Text>
-            </TouchableOpacity>
-          </View>
+            </>
+          )}
         </View>
 
         {/* ─── Bu oy ────────────────────────────────────────────── */}
-        <View style={st.statSection}>
-          <Text style={[st.sec, { color: C.textSecondary }]}>Bu oy</Text>
-          <View style={st.row}>
-            <SC icon="arrow-down-left" ic="#10B981" bg="#ECFDF5" lbl="Kirim"    val={n(monthIncome)}  />
-            <SC icon="arrow-up-right"  ic="#EF4444" bg="#FEF2F2" lbl="Chiqim"   val={n(monthExpense)} />
-            <SC icon="activity"        ic="#8B5CF6" bg="#F5F3FF" lbl="Faol bitishuv" val={String(activeDeals)} />
-            <SC icon="check-circle"    ic="#F59E0B" bg="#FFFBEB" lbl="Yopildi"  val={String(closedDeals)} />
+        {!isSeller && (
+          <View style={st.statSection}>
+            <Text style={[st.sec, { color: C.textSecondary }]}>Bu oy</Text>
+            <View style={st.row}>
+              <SC icon="arrow-down-left" ic="#10B981" bg="#ECFDF5" lbl="Kirim"    val={n(monthIncome)}  />
+              <SC icon="arrow-up-right"  ic="#EF4444" bg="#FEF2F2" lbl="Chiqim"   val={n(monthExpense)} />
+              <SC icon="activity"        ic="#8B5CF6" bg="#F5F3FF" lbl="Faol bitishuv" val={String(activeDeals)} />
+              <SC icon="check-circle"    ic="#F59E0B" bg="#FFFBEB" lbl="Yopildi"  val={String(closedDeals)} />
+            </View>
+            <View style={[st.row, { marginTop: 8 }]}>
+              <SC icon="credit-card"     ic="#EA580C" bg="#FFF7ED" lbl="Kassadan"  val={n(expensesData?.kassaDeductions || 0)} />
+              <SC icon="trending-down"   ic="#F59E0B" bg="#FFFBEB" lbl="Shaxsiy"  val={n(expensesData?.totalShaxsiy || 0)} />
+            </View>
           </View>
-        </View>
+        )}
 
         {/* ─── So'nggi bitishuvlar ───────────────────────────────── */}
         <View style={st.statSection}>
@@ -341,7 +441,7 @@ export default function StatistikaScreen() {
         </View>
 
         {/* ─── Bugungi tranzaksiyalar ────────────────────────────── */}
-        {todayTxns.length > 0 && (
+        {!isSeller && todayTxns.length > 0 && (
           <View style={st.statSection}>
             <Text style={[st.sec, { color: C.textSecondary }]}>Bugungi tranzaksiyalar</Text>
             <View style={{ gap: 6 }}>

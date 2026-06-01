@@ -10,6 +10,7 @@ import Colors from "@/constants/colors";
 import { useRouter } from "expo-router";
 import { apiReq } from "@/lib/api";
 import { useAuth } from "@/context/auth";
+import { fmtDateNum, fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
@@ -49,11 +50,11 @@ type Period = "today" | "week" | "month";
 
 function fmt(n?: number | null) {
   if (!n) return "—";
-  return n.toLocaleString("uz-UZ") + " so'm";
+  return fmtNum(n) + " so'm";
 }
 function fmtDate(d?: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("uz-UZ");
+  return fmtDateNum(d);
 }
 
 const PERIOD_LABELS: Record<Period, string> = { today: "Bugun", week: "Hafta", month: "Oy" };

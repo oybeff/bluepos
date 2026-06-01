@@ -11,15 +11,16 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate as fmtDateUtil, fmtDateTime as fmtDateTimeUtil, fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 function fmtDate(d: Date) {
-  return d.toLocaleDateString("uz-UZ", { day: "2-digit", month: "long", year: "numeric" });
+  return fmtDateUtil(d, { month: "long", year: true });
 }
 
 type Period = "today" | "week" | "month";
@@ -202,7 +203,7 @@ export default function HisobotScreen() {
 
   <div class="footer">
     Bluepos — Parda do'konlari uchun POS tizimi<br>
-    Hisobot yaratildi: ${now.toLocaleString("uz-UZ")}
+    Hisobot yaratildi: ${fmtDateTimeUtil(now)}
   </div>
 </body>
 </html>`;

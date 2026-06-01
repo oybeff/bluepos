@@ -2,14 +2,15 @@ import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Linking, Alert, Platform, RefreshControl,
-  Modal, TextInput,
+  Modal, TextInput, Image, Dimensions, FlatList,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
-import { apiReq } from "@/lib/api";
+import { apiReq, getApiUrl } from "@/lib/api";
+import { fmtDate as fmtDateUtil, fmtDateTime as fmtDateTimeUtil, fmtDateNum, fmtNum } from "../../../lib/date-utils";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
@@ -21,18 +22,19 @@ const STATUSES = [
   { key: "tayyor",       label: "Tayyor",         color: "#10B981", icon: "check-circle" as const },
   { key: "ornatilmoqda", label: "O'rnatilmoqda",  color: "#F59E0B", icon: "tool" as const },
   { key: "yopildi",      label: "Yopildi",        color: "#22C55E", icon: "flag" as const },
+  { key: "bekor",        label: "Bekor qilingan", color: "#DC2626", icon: "x-circle" as const },
 ];
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "long", year: "numeric" });
+  return fmtDateUtil(d, { month: "long", year: true });
 }
 function fmtDateTime(d: string | null | undefined) {
   if (!d) return "—";
-  return new Date(d).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return fmtDateTimeUtil(d);
 }
 
 interface Worker { id: number; fullName: string; role: string; }
@@ -76,12 +78,16 @@ export default function DealDetailScreen() {
   const [payLoading, setPayLoading] = useState(false);
   const [sharingChek, setSharingChek] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const topPad = insets.top + (Platform.OS === "web" ? 67 : 16);
+  const screenW = Dimensions.get("window").width;
 
-  const { data: deal, isLoading, refetch } = useQuery<Deal>({
+  const { data: deal, isLoading, error, refetch } = useQuery<Deal>({
     queryKey: ["deal", id],
     queryFn: () => apiReq(`/client-deals/${id}`),
     enabled: !!id,
+    retry: false,
   });
 
   const { data: workers = [] } = useQuery<Worker[]>({
@@ -89,11 +95,22 @@ export default function DealDetailScreen() {
     queryFn: () => apiReq("/workers"),
   });
 
-  const { data: photos = [] } = useQuery<{ id: number; url: string; createdAt: string }[]>({
+  const { data: rawPhotos = [] } = useQuery<{ id: number; url: string; created_at: string }[]>({
     queryKey: ["deal-photos", id],
     queryFn: () => apiReq(`/client-deals/${id}/photos`),
     enabled: !!id,
   });
+
+  const { data: dealProducts = [] } = useQuery<{ id: number; product_name: string; qty: number; unit: string; price_per_unit: number; total: number }[]>({
+    queryKey: ["deal-products", id],
+    queryFn: () => apiReq(`/client-deals/${id}/products`),
+    enabled: !!id,
+  });
+  const baseUrl = getApiUrl();
+  const photos = rawPhotos.map(p => ({
+    ...p,
+    url: p.url.startsWith("http") ? p.url : `${baseUrl}${p.url}`,
+  }));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -125,7 +142,8 @@ export default function DealDetailScreen() {
   const statusInfo = STATUSES.find(s => s.key === (deal?.status || "yangi")) || STATUSES[0];
   const tailor = workers.find(w => w.id === deal?.tailorWorkerId);
   const installer = workers.find(w => w.id === deal?.installerWorkerId);
-  const grandTotal = (deal?.totalNarx || 0) + (deal?.ornatishNarx || 0) + (deal?.chevarJami || 0);
+  const dpTotal = dealProducts.reduce((s, p) => s + (p.total || 0), 0);
+  const grandTotal = (deal?.totalNarx || 0) + (deal?.ornatishNarx || 0) + (deal?.chevarJami || 0) + dpTotal;
   const tolov = deal ? grandTotal - (deal.qarzSumma || 0) : 0;
 
   async function handlePayment() {
@@ -189,7 +207,7 @@ td{padding:8px 12px;border-bottom:1px solid #f1f5f9;}
   <div class="row"><span class="label">Ism</span><span class="val">${deal.mijozIsm || "—"}</span></div>
   <div class="row"><span class="label">Telefon</span><span class="val">${deal.mijozPhone || "—"}</span></div>
   <div class="row"><span class="label">Manzil</span><span class="val">${deal.manzil || "—"}</span></div>
-  <div class="row"><span class="label">Taklif sanasi</span><span class="val">${new Date().toLocaleDateString("uz-UZ")}</span></div>
+  <div class="row"><span class="label">Taklif sanasi</span><span class="val">${fmtDateNum(new Date())}</span></div>
   ${deal.tayyorBolishKuni ? `<div class="row"><span class="label">Tayyor bo'lish kuni</span><span class="val">${fmtDate(deal.tayyorBolishKuni)}</span></div>` : ""}
 </div>
 
@@ -213,7 +231,7 @@ ${meas.length > 0 ? `<h3>O'lchamlar</h3>
   <div class="total-row grand"><span>JAMI SUMMA</span><span>${fmt(grandTotal)}</span></div>
 </div>
 
-<div class="footer">Ushbu taklifnoma BluePOS tizimi orqali yaratildi · ${new Date().toLocaleDateString("uz-UZ")}</div>
+<div class="footer">Ushbu taklifnoma BluePOS tizimi orqali yaratildi · ${fmtDateNum(new Date())}</div>
 </body></html>`;
 
       const { uri } = await Print.printToFileAsync({ html });
@@ -242,7 +260,7 @@ hr{border:1px dashed #d1d5db;margin:12px 0;}
 <h2>BluePOS</h2>
 <div class="sub">Parda do'konlari uchun POS tizimi</div>
 <div class="row"><span class="label">Chek #</span><span class="value">${deal.id}</span></div>
-<div class="row"><span class="label">Sana</span><span class="value">${new Date().toLocaleDateString("uz-UZ")}</span></div>
+<div class="row"><span class="label">Sana</span><span class="value">${fmtDateNum(new Date())}</span></div>
 <hr/>
 <div class="row"><span class="label">Mijoz</span><span class="value">${deal.mijozIsm || "—"}</span></div>
 <div class="row"><span class="label">Telefon</span><span class="value">${deal.mijozPhone || "—"}</span></div>
@@ -268,13 +286,14 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
   }
 
   async function handleDelete() {
+    if (deal?.status === "bekor") return;
     Alert.alert(
-      "O'chirish",
-      "Buyurtma, barcha to'lovlar va tranzaksiyalar o'chiriladi. Davom etasizmi?",
+      "Bekor qilish",
+      "Buyurtma bekor qilinadi, qarz va to'lovlar o'chiriladi. 23 soatdan keyin butunlay o'chiriladi. Davom etasizmi?",
       [
-        { text: "Bekor qilish", style: "cancel" },
+        { text: "Yo'q", style: "cancel" },
         {
-          text: "O'chirish", style: "destructive",
+          text: "Bekor qilish", style: "destructive",
           onPress: async () => {
             setDeleting(true);
             try {
@@ -282,10 +301,10 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
               await Promise.all([
                 qc.invalidateQueries({ queryKey: ["client-deals"] }),
                 qc.invalidateQueries({ queryKey: ["deals-recent"] }),
-                qc.invalidateQueries({ queryKey: ["dashboard"] }),
-                qc.invalidateQueries({ queryKey: ["finance"] }),
+                qc.invalidateQueries({ queryKey: ["deal", id] }),
+                qc.invalidateQueries({ queryKey: ["qarz-daftar"] }),
               ]);
-              Alert.alert("O'chirildi", "Buyurtma muvaffaqiyatli o'chirildi");
+              Alert.alert("Bekor qilindi", "Buyurtma bekor qilindi. 23 soatdan keyin butunlay o'chiriladi.");
               router.back();
             } catch (e: any) {
               Alert.alert("Xato", e.message);
@@ -318,13 +337,17 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
     );
   }
 
-  if (!deal) {
+  if (error || !deal) {
     return (
       <View style={[st.loadWrap, { paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
           <Feather name="arrow-left" size={22} color={C.text} />
         </TouchableOpacity>
-        <Text style={[st.emptyTxt, { color: C.textSecondary }]}>Buyurtma topilmadi</Text>
+        <Feather name="alert-circle" size={40} color={C.textSecondary} style={{ marginTop: 60 }} />
+        <Text style={[st.emptyTxt, { color: C.textSecondary, marginTop: 12 }]}>Buyurtma topilmadi</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16, backgroundColor: C.primary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 }}>
+          <Text style={{ color: "#fff", fontWeight: "600" }}>Orqaga</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -437,6 +460,30 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
             <InfoRow icon="scissors" label="Tikuvchi haqi" value={fmt(deal.chevarJami)} />
           )}
         </Section>
+
+        {/* ── Mahsulotlar ── */}
+        {dealProducts.length > 0 && (
+          <Section title={`Mahsulotlar (${dealProducts.length})`} icon="box">
+            {dealProducts.map(dp => (
+              <View key={dp.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "#EFF6FF", alignItems: "center", justifyContent: "center" }}>
+                  <Feather name="box" size={14} color="#3B82F6" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.text }} numberOfLines={1}>{dp.product_name}</Text>
+                  <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: C.textSecondary }}>
+                    {dp.qty} {dp.unit} × {fmt(dp.price_per_unit)}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", color: C.text }}>{fmt(dp.total)}</Text>
+              </View>
+            ))}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingTop: 8, marginTop: 4, borderTopWidth: 1, borderTopColor: C.border }}>
+              <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.textSecondary }}>Mahsulotlar jami</Text>
+              <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: C.primary }}>{fmt(dpTotal)}</Text>
+            </View>
+          </Section>
+        )}
 
         {/* ── To'lov holati ── */}
         <View style={[st.payCard, { backgroundColor: C.primary }]}>
@@ -598,11 +645,54 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
         {/* ── Rasmlar ── */}
         {photos.length > 0 && (
           <Section title={`Rasmlar (${photos.length})`} icon="image">
-            <Text style={[{ fontSize: 13, color: C.textSecondary, fontFamily: "Inter_400Regular" }]}>
-              {photos.length} ta rasm yuklangan
-            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {photos.map((p, idx) => (
+                <TouchableOpacity
+                  key={p.id}
+                  onPress={() => { setViewerIndex(idx); setViewerVisible(true); }}
+                  activeOpacity={0.85}
+                >
+                  <Image
+                    source={{ uri: p.url }}
+                    style={{ width: (screenW - 64) / 3, height: (screenW - 64) / 3, borderRadius: 10 }}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
           </Section>
         )}
+
+        {/* Fullscreen photo viewer */}
+        <Modal visible={viewerVisible} transparent animationType="fade">
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.95)" }}>
+            <TouchableOpacity
+              style={{ position: "absolute", top: insets.top + 10, right: 16, zIndex: 10, padding: 8 }}
+              onPress={() => setViewerVisible(false)}
+            >
+              <Feather name="x" size={28} color="#fff" />
+            </TouchableOpacity>
+            <Text style={{ color: "#fff", textAlign: "center", marginTop: insets.top + 14, fontSize: 14, fontFamily: "Inter_500Medium" }}>
+              {viewerIndex + 1} / {photos.length}
+            </Text>
+            <FlatList
+              data={photos}
+              horizontal
+              pagingEnabled
+              initialScrollIndex={viewerIndex}
+              getItemLayout={(_, i) => ({ length: screenW, offset: screenW * i, index: i })}
+              onMomentumScrollEnd={(e) => setViewerIndex(Math.round(e.nativeEvent.contentOffset.x / screenW))}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={({ item }) => (
+                <Image
+                  source={{ uri: item.url }}
+                  style={{ width: screenW, height: "100%" }}
+                  resizeMode="contain"
+                />
+              )}
+              showsHorizontalScrollIndicator={false}
+            />
+          </View>
+        </Modal>
 
         {/* ── Tahrirlash ── */}
         <TouchableOpacity
@@ -633,22 +723,29 @@ ${deal.qarzKaytarishKuni ? `<div class="row"><span class="label">To'lov muddati<
           <Feather name="chevron-right" size={16} color={C.primary} />
         </TouchableOpacity>
 
-        {/* ── O'chirish ── */}
-        <TouchableOpacity
-          style={[st.deleteBtn, { opacity: deleting ? 0.6 : 1 }]}
-          onPress={handleDelete}
-          disabled={deleting}
-          activeOpacity={0.85}
-        >
-          {deleting ? (
-            <ActivityIndicator size="small" color="#DC2626" />
-          ) : (
-            <>
-              <Feather name="trash-2" size={16} color="#DC2626" />
-              <Text style={st.deleteBtnTxt}>Buyurtmani o'chirish</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {/* ── Bekor qilish ── */}
+        {deal?.status === "bekor" ? (
+          <View style={[st.deleteBtn, { backgroundColor: "#FEE2E2", borderColor: "#DC2626" }]}>
+            <Feather name="x-circle" size={16} color="#DC2626" />
+            <Text style={st.deleteBtnTxt}>Bekor qilingan — 23 soatda o'chiriladi</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[st.deleteBtn, { opacity: deleting ? 0.6 : 1 }]}
+            onPress={handleDelete}
+            disabled={deleting}
+            activeOpacity={0.85}
+          >
+            {deleting ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <>
+                <Feather name="x-circle" size={16} color="#DC2626" />
+                <Text style={st.deleteBtnTxt}>Buyurtmani bekor qilish</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
 
       </ScrollView>
 

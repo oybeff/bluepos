@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDateNum, fmtDateTime, fmtTime as fmtTimeUtil, fmtNum } from "@/lib/date-utils";
 import * as Print from "expo-print";
 
 const C = Colors.light;
@@ -49,16 +50,16 @@ interface DebtAlert {
 const KATEGORIYALAR = ["savdo", "kirim", "chiqim", "ish haqi", "ijara", "ta'mirlash", "umumiy"];
 
 function fmt(n: number): string {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+  return fmtNum(Math.round(n)) + " so'm";
 }
 
 function fmtTime(d: string): string {
-  return new Date(d).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
+  return fmtTimeUtil(d);
 }
 
 function fmtDate(d: string | null): string {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return fmtDateNum(d);
 }
 
 export default function KassaScreen() {
@@ -160,8 +161,8 @@ export default function KassaScreen() {
   const handlePrintShift = async () => {
     if (!shift) return;
     try {
-      const fmtDate2 = (d: string) => new Date(d).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-      const fmtN = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0));
+      const fmtDate2 = (d: string) => fmtDateTime(d);
+      const fmtN = (n: number) => fmtNum(Math.round(n || 0));
       const txns = shift.transactions || [];
       const naqdKirim = txns.filter((t: any) => t.tur === "kirim" && t.tolov === "naqd").reduce((s: number, t: any) => s + t.summa, 0);
       const plastikKirim = txns.filter((t: any) => t.tur === "kirim" && t.tolov === "plastik").reduce((s: number, t: any) => s + t.summa, 0);
@@ -195,7 +196,7 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate2(s
 <hr>
 <div class="row"><span>Tranzaksiyalar:</span><span>${txns.length} ta</span></div>
 <hr>
-<div class="footer">${new Date().toLocaleString("uz-UZ")}</div>
+<div class="footer">${fmtDateTime(new Date())}</div>
 </body></html>`;
       if (Platform.OS === "web") {
         const w = window.open("", "_blank");
@@ -352,7 +353,7 @@ ${shift.yopilganSana ? `<div class="row"><span>Yopildi:</span><span>${fmtDate2(s
                       {hisob.mijozIsm ? ` — ${hisob.mijozIsm}` : ""}
                     </Text>
                     <Text style={[s.txnMeta, { color: C.textSecondary }]}>
-                      {hisob.mijozPhone ? `📞 ${hisob.mijozPhone} · ` : ""}{new Date(hisob.createdAt).toLocaleDateString("uz-UZ")}
+                      {hisob.mijozPhone ? `📞 ${hisob.mijozPhone} · ` : ""}{fmtDateNum(hisob.createdAt)}
                     </Text>
                   </View>
                   <View style={{ alignItems: "flex-end", gap: 4 }}>

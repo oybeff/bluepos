@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Modal, Alert, ActivityIndicator, RefreshControl, Switch,
+  KeyboardAvoidingView, Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -11,7 +12,7 @@ import { apiReq } from "@/lib/api";
 
 const C = Colors.light;
 
-type Role = "tailor" | "installer" | "manager";
+type Role = "tailor" | "installer" | "manager" | "seller" | "measurer" | "accountant" | "worker";
 type Worker = {
   id: number;
   fullName: string;
@@ -22,13 +23,17 @@ type Worker = {
 };
 
 const ROLES: { key: Role; label: string; icon: string; color: string }[] = [
-  { key: "tailor",    label: "Tikuvchi",     icon: "scissors",  color: "#8B5CF6" },
-  { key: "installer", label: "O'rnatuvchi",  icon: "tool",      color: "#F59E0B" },
-  { key: "manager",   label: "Menejer",      icon: "user",      color: "#3B82F6" },
+  { key: "tailor",     label: "Tikuvchi",     icon: "scissors",  color: "#8B5CF6" },
+  { key: "installer",  label: "O'rnatuvchi",  icon: "tool",      color: "#F59E0B" },
+  { key: "manager",    label: "Menejer",      icon: "briefcase", color: "#3B82F6" },
+  { key: "seller",     label: "Sotuvchi",     icon: "shopping-bag", color: "#10B981" },
+  { key: "measurer",   label: "O'lchuvchi",   icon: "maximize",  color: "#EC4899" },
+  { key: "accountant", label: "Hisobchi",     icon: "book",      color: "#6366F1" },
+  { key: "worker",     label: "Ishchi",       icon: "user",      color: "#6B7280" },
 ];
 
 const EMPTY: Omit<Worker, "id" | "activeDealCount"> = {
-  fullName: "", role: "tailor", phone: "", isActive: true,
+  fullName: "", role: "worker", phone: "", isActive: true,
 };
 
 const EMPTY_ACC = { createAccount: false, username: "", password: "" };
@@ -245,7 +250,7 @@ export default function XodimlarScreen() {
                     <TouchableOpacity style={[st.iconBtn, { backgroundColor: C.primary + "12" }]} onPress={() => openEdit(w)}>
                       <Feather name="edit-2" size={15} color={C.primary} />
                     </TouchableOpacity>
-                    {(w.role === "tailor" || w.role === "installer") && (
+                    {(w.role === "tailor" || w.role === "installer" || w.role === "seller") && (
                       <TouchableOpacity style={[st.iconBtn, { backgroundColor: "#EFF6FF" }]} onPress={() => openCreateAccount(w)}>
                         <Feather name="user-plus" size={15} color="#3B82F6" />
                       </TouchableOpacity>
@@ -266,6 +271,7 @@ export default function XodimlarScreen() {
 
       {/* Add/Edit Modal */}
       <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={[st.modalWrap, { backgroundColor: C.background }]}>
           <View style={[st.modalHeader, { borderBottomColor: C.border }]}>
             <Text style={[st.modalTitle, { color: C.text }]}>{editing ? "Tahrirlash" : "Yangi xodim"}</Text>
@@ -273,7 +279,7 @@ export default function XodimlarScreen() {
               <Feather name="x" size={24} color={C.text} />
             </TouchableOpacity>
           </View>
-          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
             <Text style={[st.fLabel, { color: C.textSecondary }]}>To'liq ism *</Text>
             <TextInput
               style={[st.input, { borderColor: C.border, backgroundColor: C.surface, color: C.text }]}
@@ -373,10 +379,12 @@ export default function XodimlarScreen() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Hisob yaratish Modal */}
       <Modal visible={showAccModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAccModal(false)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={[st.modalWrap, { backgroundColor: C.background }]}>
           <View style={[st.modalHeader, { borderBottomColor: C.border }]}>
             <View>
@@ -387,7 +395,7 @@ export default function XodimlarScreen() {
               <Feather name="x" size={24} color={C.text} />
             </TouchableOpacity>
           </View>
-          <View style={{ padding: 20, gap: 16 }}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, gap: 16 }}>
             <View style={[{ backgroundColor: "#EFF6FF", borderRadius: 12, padding: 12, flexDirection: "row", gap: 10, alignItems: "center" }]}>
               <Feather name="info" size={16} color="#3B82F6" />
               <Text style={{ fontSize: 12, color: "#1D4ED8", fontFamily: "Inter_400Regular", flex: 1 }}>
@@ -422,8 +430,9 @@ export default function XodimlarScreen() {
                 : <><Feather name="user-check" size={18} color="#fff" /><Text style={st.submitTxt}>Hisob yaratish</Text></>
               }
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

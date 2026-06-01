@@ -2,12 +2,14 @@ import React, { useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Platform, RefreshControl, Modal,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate, fmtTime as fmtTimeUtil, fmtNum } from "../../lib/date-utils";
 
 const C = Colors.light;
 
@@ -24,13 +26,9 @@ const KATEGORIYALAR = [
   { id: "boshqa",   label: "Boshqa",   icon: "more-horizontal"as const, color: "#64748B" },
 ];
 
-function sum(v: number) { return new Intl.NumberFormat("uz-UZ").format(Math.round(v)) + " so'm"; }
-function fmtTime(d: string) {
-  return new Date(d).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
-}
-function today() {
-  return new Date().toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" });
-}
+function sum(v: number) { return fmtNum(Math.round(v)) + " so'm"; }
+function fmtTime(d: string) { return fmtTimeUtil(d); }
+function today() { return fmtDate(new Date(), { month: "long", year: true }); }
 
 export default function RasxodlarScreen() {
   const insets = useSafeAreaInsets();
@@ -74,6 +72,25 @@ export default function RasxodlarScreen() {
   const monthTotal = monthTxns.reduce((s, t) => s + t.amount, 0);
 
   const resetForm = () => { setAmount(""); setDescription(""); setCategory("boshqa"); };
+
+  const handleDelete = async (id: number) => {
+    Alert.alert("O'chirish", "Bu rasxodni o'chirmoqchimisiz?", [
+      { text: "Bekor", style: "cancel" },
+      { text: "O'chirish", style: "destructive", onPress: async () => {
+        try {
+          await apiReq(`/finance/transactions/${id}`, { method: "DELETE" });
+          await Promise.all([
+            qc.invalidateQueries({ queryKey: ["rasxodlar-today"] }),
+            qc.invalidateQueries({ queryKey: ["rasxodlar-month"] }),
+            qc.invalidateQueries({ queryKey: ["finance-today"] }),
+            qc.invalidateQueries({ queryKey: ["finance-month"] }),
+            qc.invalidateQueries({ queryKey: ["worker-expenses"] }),
+            qc.invalidateQueries({ queryKey: ["worker-expenses-summary"] }),
+          ]);
+        } catch { Alert.alert("Xato", "O'chirib bo'lmadi"); }
+      }},
+    ]);
+  };
 
   const handleAdd = async () => {
     const amt = parseFloat(amount);
@@ -181,7 +198,7 @@ export default function RasxodlarScreen() {
             {todayTxns.map(t => {
               const kat = katCfg(t.category);
               return (
-                <View key={t.id} style={[s.txnRow, { backgroundColor: C.surface, borderColor: C.border }]}>
+                <TouchableOpacity key={t.id} style={[s.txnRow, { backgroundColor: C.surface, borderColor: C.border }]} activeOpacity={0.7} onPress={() => handleDelete(t.id)}>
                   <View style={[s.katIcon, { backgroundColor: kat.color + "18" }]}>
                     <Feather name={kat.icon} size={14} color={kat.color} />
                   </View>
@@ -190,7 +207,8 @@ export default function RasxodlarScreen() {
                     <Text style={[s.txnTime, { color: C.textSecondary }]}>{fmtTime(t.createdAt)}</Text>
                   </View>
                   <Text style={[s.txnAmt, { color: "#EF4444" }]}>-{sum(t.amount)}</Text>
-                </View>
+                  <Feather name="trash-2" size={15} color="#94A3B8" />
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -199,62 +217,70 @@ export default function RasxodlarScreen() {
 
       {/* ─── Modal ──────────────────────────────────────────────── */}
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
-        <View style={s.modalWrap}>
-        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowModal(false)} />
-        <View style={[s.sheet, { backgroundColor: C.card }]}>
-          <View style={s.sheetHandle} />
-          <Text style={[s.sheetTitle, { color: C.text }]}>Yangi rasxod</Text>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+          <View style={s.modalWrap}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowModal(false)} />
+            <ScrollView
+              bounces={false}
+              contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={[s.sheet, { backgroundColor: C.card }]}>
+                <View style={s.sheetHandle} />
+                <Text style={[s.sheetTitle, { color: C.text }]}>Yangi rasxod</Text>
 
-          {/* Kategoriya */}
-          <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Kategoriya</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {KATEGORIYALAR.map(k => (
+                {/* Kategoriya */}
+                <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Kategoriya</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {KATEGORIYALAR.map(k => (
+                      <TouchableOpacity
+                        key={k.id}
+                        style={[s.katChip, {
+                          borderColor: category === k.id ? k.color : C.border,
+                          backgroundColor: category === k.id ? k.color + "15" : C.surface,
+                        }]}
+                        onPress={() => setCategory(k.id)}
+                      >
+                        <Feather name={k.icon} size={13} color={category === k.id ? k.color : C.textSecondary} />
+                        <Text style={[s.katChipTxt, { color: category === k.id ? k.color : C.textSecondary }]}>
+                          {k.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+
+                {/* Summa */}
+                <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Summa (so'm)</Text>
+                <TextInput
+                  style={[s.input, { borderColor: C.border, color: C.text, backgroundColor: C.surface }]}
+                  value={amount} onChangeText={setAmount}
+                  placeholder="Masalan: 50 000" placeholderTextColor={C.textSecondary}
+                  keyboardType="decimal-pad"
+                />
+
+                {/* Tavsif */}
+                <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Tavsif</Text>
+                <TextInput
+                  style={[s.input, { borderColor: C.border, color: C.text, backgroundColor: C.surface }]}
+                  value={description} onChangeText={setDescription}
+                  placeholder="Masalan: Oylik ijara to'lovi" placeholderTextColor={C.textSecondary}
+                />
+
                 <TouchableOpacity
-                  key={k.id}
-                  style={[s.katChip, {
-                    borderColor: category === k.id ? k.color : C.border,
-                    backgroundColor: category === k.id ? k.color + "15" : C.surface,
-                  }]}
-                  onPress={() => setCategory(k.id)}
+                  style={[s.submitBtn, { backgroundColor: "#EF4444", opacity: loading ? 0.7 : 1 }]}
+                  onPress={handleAdd} disabled={loading}
                 >
-                  <Feather name={k.icon} size={13} color={category === k.id ? k.color : C.textSecondary} />
-                  <Text style={[s.katChipTxt, { color: category === k.id ? k.color : C.textSecondary }]}>
-                    {k.label}
-                  </Text>
+                  {loading
+                    ? <ActivityIndicator color="#fff" />
+                    : <><Feather name="check" size={18} color="#fff" /><Text style={s.submitTxt}>Saqlash</Text></>
+                  }
                 </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-
-          {/* Summa */}
-          <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Summa (so'm)</Text>
-          <TextInput
-            style={[s.input, { borderColor: C.border, color: C.text, backgroundColor: C.surface }]}
-            value={amount} onChangeText={setAmount}
-            placeholder="Masalan: 50 000" placeholderTextColor={C.textSecondary}
-            keyboardType="decimal-pad"
-          />
-
-          {/* Tavsif */}
-          <Text style={[s.fieldLbl, { color: C.textSecondary }]}>Tavsif</Text>
-          <TextInput
-            style={[s.input, { borderColor: C.border, color: C.text, backgroundColor: C.surface }]}
-            value={description} onChangeText={setDescription}
-            placeholder="Masalan: Oylik ijara to'lovi" placeholderTextColor={C.textSecondary}
-          />
-
-          <TouchableOpacity
-            style={[s.submitBtn, { backgroundColor: "#EF4444", opacity: loading ? 0.7 : 1 }]}
-            onPress={handleAdd} disabled={loading}
-          >
-            {loading
-              ? <ActivityIndicator color="#fff" />
-              : <><Feather name="check" size={18} color="#fff" /><Text style={s.submitTxt}>Saqlash</Text></>
-            }
-          </TouchableOpacity>
-        </View>
-        </View>
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate as fmtDateUtil, fmtDayMonth, fmtNum } from "../../lib/date-utils";
 
 const C = Colors.light;
 
@@ -34,14 +35,12 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }>
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return "—";
-  const dt = new Date(d);
-  return dt.toLocaleDateString("uz-UZ", { day: "2-digit", month: "long", year: "numeric" });
+  return fmtDateUtil(d, { month: "long", year: true });
 }
 
 function fmtShort(d: string | null | undefined): string {
   if (!d) return "—";
-  const dt = new Date(d);
-  return dt.toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit" });
+  return fmtDayMonth(d);
 }
 
 function daysLeft(d: string | null | undefined): number {
@@ -51,7 +50,7 @@ function daysLeft(d: string | null | undefined): number {
 
 function fmtMoney(n: number | null): string {
   if (!n) return "—";
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+  return fmtNum(Math.round(n)) + " so'm";
 }
 
 function getWeekDays(): Date[] {

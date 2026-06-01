@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { getApiUrl } from "@/lib/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { fmtDate as fmtDateUtil, fmtNum } from "../lib/date-utils";
 
 interface Deal {
   id: number;
@@ -35,8 +36,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }
 
 function formatDate(d: string | null) {
   if (!d) return "—";
-  const date = new Date(d);
-  return date.toLocaleDateString("uz-UZ", { day: "2-digit", month: "long" });
+  return fmtDateUtil(d, { month: "long" });
 }
 function formatTime(d: string | null) {
   if (!d) return "";
@@ -46,7 +46,7 @@ function formatTime(d: string | null) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 function formatMoney(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+  return fmtNum(Math.round(n)) + " so'm";
 }
 function isToday(d: string | null) {
   if (!d) return false;

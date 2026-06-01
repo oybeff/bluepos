@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum } from "@/lib/date-utils";
 
 const C = Colors.light;
 
@@ -32,7 +33,7 @@ interface OrderItem {
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 export default function SupplierOrderScreen() {

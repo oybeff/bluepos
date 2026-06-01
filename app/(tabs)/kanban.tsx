@@ -11,11 +11,12 @@ import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate as fmtDateUz, fmtDateNum, fmtDayMonth, fmtNum } from "../../lib/date-utils";
 
 const C = Colors.light;
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+const fmt = (n: number) => fmtNum(Math.round(n)) + " so'm";
 const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit" }) : null;
+  d ? fmtDayMonth(new Date(d)) : null;
 
 const STATUSES = [
   { key: "yangi", label: "🆕 Yangi", color: "#3B82F6" },
@@ -23,6 +24,7 @@ const STATUSES = [
   { key: "tayyor", label: "✅ Tayyor", color: "#10B981" },
   { key: "ornatilmoqda", label: "🔧 O'rnatilmoqda", color: "#F59E0B" },
   { key: "yopildi", label: "🏁 Yopildi", color: "#22C55E" },
+  { key: "bekor", label: "❌ Bekor", color: "#DC2626" },
 ];
 const NEXT: Record<string, string> = { yangi: "tikuvda", tikuvda: "tayyor", tayyor: "ornatilmoqda", ornatilmoqda: "yopildi" };
 const PREV: Record<string, string> = { tikuvda: "yangi", tayyor: "tikuvda", ornatilmoqda: "tayyor", yopildi: "ornatilmoqda" };
@@ -328,7 +330,7 @@ function DealDetail({ deal, onClose, onStatusChange }: { deal: any; onClose: () 
               <DR icon="map-pin" label={deal.manzil} color={C.primary} />
             </TouchableOpacity>
           )}
-          {deal.tayyorBolishKuni && <DR icon="calendar" label={`Tayyor: ${new Date(deal.tayyorBolishKuni).toLocaleDateString("uz-UZ")}`} />}
+          {deal.tayyorBolishKuni && <DR icon="calendar" label={`Tayyor: ${fmtDateNum(new Date(deal.tayyorBolishKuni))}`} />}
         </View>
 
         {/* Moliya */}
@@ -478,7 +480,7 @@ function MarshrutScreen({ onClose }: { onClose: () => void }) {
     Alert.alert("Manzil kiritilmagan");
   }
 
-  const today = new Date().toLocaleDateString("uz-UZ", { day: "2-digit", month: "long", year: "numeric" });
+  const today = fmtDateUz(new Date(), { month: "long", year: true });
 
   return (
     <View style={[styles.modal, { backgroundColor: C.background }]}>

@@ -20,9 +20,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiReq } from "@/lib/api";
 import Colors from "@/constants/colors";
 import DateInput, { buildDateStr } from "@/components/DateInput";
+import { fmtNum } from "@/lib/date-utils";
 
 const C = Colors.light;
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+const fmt = (n: number) => fmtNum(Math.round(n)) + " so'm";
 
 interface Oyna {
   id: string;
@@ -95,8 +96,8 @@ export default function MijozScreen() {
     queryKey: ["workers"],
     queryFn: () => apiReq<any[]>("/workers"),
   });
-  const tailors = workers.filter((w: any) => w.role === "chevar");
-  const installers = workers.filter((w: any) => w.role === "montaj");
+  const tailors = workers.filter((w: any) => w.role === "tailor" || w.role === "chevar");
+  const installers = workers.filter((w: any) => w.role === "installer" || w.role === "montaj");
 
   // Calculations
   const calcResults = oynaList.map(o => ({ o, c: calcOyna(o) }));

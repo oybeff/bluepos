@@ -10,6 +10,7 @@ import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { fmtDate as fmtDateUz, fmtDateNum, fmtDayMonth, fmtNum as fmtNumUtil } from "../../lib/date-utils";
 
 const C = Colors.light;
 
@@ -39,7 +40,7 @@ const STATUS_COLORS = ["#3B82F6","#10B981","#F59E0B","#EF4444","#8B5CF6","#EC489
 
 function n(v: number | null | undefined) {
   if (!v) return "0";
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(v));
+  return fmtNumUtil(Math.round(v));
 }
 function nfull(v: number | null | undefined) { return n(v) + " so'm"; }
 function mln(v: number) {
@@ -129,6 +130,16 @@ function buildGeneralHtml(gen: any, dash: any, period: Period, dateStr: string) 
     <div class="row"><span class="lbl">Karniiz/aksessuarlar</span><span class="val">${nfull(gen?.totalKarniiz)}</span></div>
   </div>
 </div>
+${(gen?.kassaKirim > 0 || gen?.kassaChiqim > 0) ? `<div class="sec">
+  <div class="stl">Kassa operatsiyalari</div>
+  <div class="box">
+    <div class="row"><span class="lbl">Naqd kirim</span><span class="val green">${nfull(gen?.kassaNaqd)}</span></div>
+    <div class="row"><span class="lbl">Plastik kirim</span><span class="val blue">${nfull(gen?.kassaPlastik)}</span></div>
+    <div class="row"><span class="lbl">Chiqim</span><span class="val red">${nfull(gen?.kassaChiqim)}</span></div>
+    <div class="row"><span class="lbl">Sof qoldiq</span><span class="val">${nfull((gen?.kassaKirim ?? 0) - (gen?.kassaChiqim ?? 0))}</span></div>
+    <div class="row"><span class="lbl">Tranzaksiyalar</span><span class="val">${gen?.kassaTxns ?? 0} ta</span></div>
+  </div>
+</div>` : ""}
 <div class="sec">
   <div class="stl">Bugungi holat</div>
   <div class="box">
@@ -152,7 +163,7 @@ function buildKirimChiqimHtml(data: any, year: number, month: number, dateStr: s
 
   const dealRowsHtml = (data?.dealRows ?? []).map((d: any) =>
     `<tr>
-      <td>${d.date ? new Date(d.date).toLocaleDateString("uz-UZ") : "—"}</td>
+      <td>${d.date ? fmtDateNum(new Date(d.date)) : "—"}</td>
       <td style="text-align:right">${nfull(d.savdo)}</td>
       <td style="text-align:right;color:#10B981">${nfull(d.naqdKirim)}</td>
       <td style="text-align:right;color:#EF4444">${nfull(d.qarz)}</td>
@@ -242,7 +253,7 @@ function buildCustomerHtml(customer: any, deals: any[], summary: any, dateStr: s
   const dealsRows = deals.map((d: any) => `
     <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:10px;">
       <div style="font-size:11px;color:#6b7280;margin-bottom:6px;font-weight:600;">
-        ${d.created_at ? new Date(d.created_at).toLocaleDateString("uz-UZ") : "—"} · ${STATUS_LABELS[d.status] ?? d.status}
+        ${d.created_at ? fmtDateNum(new Date(d.created_at)) : "—"} · ${STATUS_LABELS[d.status] ?? d.status}
       </div>
       <div class="row"><span class="lbl">Tovar narxi</span><span class="val">${nfull(parseFloat(d.total_narx ?? d.totalNarx ?? "0"))}</span></div>
       <div class="row"><span class="lbl">Naqd to'lov</span><span class="val green">${nfull(parseFloat(d.naqd_tolov ?? d.naqdTolov ?? "0"))}</span></div>
@@ -390,7 +401,7 @@ export default function HisobotScreen() {
   const maxStatusCount = (statusEntries[0]?.[1] as number) ?? 1;
   const dailyData = sales?.dailyData ?? [];
   const maxDailySales = Math.max(...dailyData.map((d: any) => d.sales), 1);
-  const dateStr = new Date().toLocaleDateString("uz-UZ", { day: "numeric", month: "long", year: "numeric" });
+  const dateStr = fmtDateUz(new Date(), { month: "long", year: true });
 
   const getHtmlForTab = () => {
     if (tab === "umumiy")       return buildGeneralHtml(gen, dash, period, dateStr);
@@ -521,6 +532,19 @@ export default function HisobotScreen() {
                     <StatRow icon="layers"       color="#06B6D4" label="Karniiz/aksessuarlar"    value={nfull(gen?.totalKarniiz)} />
                   </View>
                 </View>
+
+                {(gen?.kassaTxns > 0 || gen?.kassaKirim > 0 || gen?.kassaChiqim > 0) && (
+                  <View style={[s.section, { backgroundColor: C.surface, borderColor: C.border }]}>
+                    <Text style={[s.sectionTitle, { color: C.text }]}>Kassa operatsiyalari</Text>
+                    <View style={{ gap: 0, marginTop: 8 }}>
+                      <StatRow icon="arrow-down-left" color="#10B981" label="Naqd kirim"     value={nfull(gen?.kassaNaqd)} />
+                      <StatRow icon="credit-card"     color="#3B82F6" label="Plastik kirim"  value={nfull(gen?.kassaPlastik)} />
+                      <StatRow icon="arrow-up-right"  color="#EF4444" label="Chiqim"         value={nfull(gen?.kassaChiqim)} />
+                      <StatRow icon="trending-up"     color="#6366F1" label="Sof qoldiq"     value={nfull((gen?.kassaKirim ?? 0) - (gen?.kassaChiqim ?? 0))} />
+                      <StatRow icon="hash"            color="#8B5CF6" label="Tranzaksiyalar" value={`${gen?.kassaTxns ?? 0} ta`} />
+                    </View>
+                  </View>
+                )}
 
                 <View style={s.gridRow}>
                   <View style={[s.gridCard, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
@@ -722,7 +746,7 @@ export default function HisobotScreen() {
                     {kcData.dealRows.map((d: any, i: number) => (
                       <View key={i} style={[s.statRow, { paddingVertical: 8 }]}>
                         <Text style={{ fontSize: 12, color: C.textSecondary, width: 70 }}>
-                          {d.date ? new Date(d.date).toLocaleDateString("uz-UZ", { day: "numeric", month: "short" }) : "—"}
+                          {d.date ? fmtDateUz(new Date(d.date)) : "—"}
                         </Text>
                         <Text style={{ fontSize: 12, color: C.text, flex: 1 }}>{nfull(d.savdo)}</Text>
                         <Text style={{ fontSize: 12, color: "#10B981", marginRight: 8 }}>+{mln(d.naqdKirim ?? 0)}</Text>
@@ -812,7 +836,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
   },
   shareTxt: { fontSize: 13, fontWeight: "600", color: "#fff", fontFamily: "Inter_600SemiBold" },
-  tabsScroll: { borderBottomWidth: 1, borderBottomColor: C.border, maxHeight: 50 },
+  tabsScroll: { borderBottomWidth: 1, borderBottomColor: C.border },
   tabsContent: { flexDirection: "row", paddingHorizontal: 12, paddingVertical: 8, gap: 6 },
   tab: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 6 },
   tabTxt: { fontSize: 13, fontWeight: "600", fontFamily: "Inter_600SemiBold" },

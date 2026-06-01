@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate as fmtDateUtil, fmtTime, fmtDateTime } from "@/lib/date-utils";
 
 const C = Colors.light;
 
@@ -45,15 +46,11 @@ function fmt(n: number, unit?: string): string {
 }
 
 function fmtDate(d: string): string {
-  const dt = new Date(d);
-  return dt.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short" }) +
-    " " + dt.toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
+  return fmtDateUtil(d) + " " + fmtTime(d);
 }
 
 function fmtDateFull(d: string): string {
-  const dt = new Date(d);
-  return dt.toLocaleDateString("uz-UZ", { day: "2-digit", month: "long", year: "numeric" }) +
-    " " + dt.toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" });
+  return fmtDateUtil(d, { month: "long", year: true }) + " " + fmtTime(d);
 }
 
 type Tab = "harakatlar" | "qoldiq";

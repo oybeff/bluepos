@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/auth";
 import { apiReq } from "@/lib/api";
+import { fmtNum, fmtDateNumShort } from "../../lib/date-utils";
 
 interface Order {
   id: number;
@@ -58,11 +59,11 @@ const FILTER_STATUSES = [
 ];
 
 function formatMoney(amount: number): string {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(amount)) + " so'm";
+  return fmtNum(Math.round(amount)) + " so'm";
 }
 
 function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return fmtDateNumShort(date);
 }
 
 export default function OrdersScreen() {

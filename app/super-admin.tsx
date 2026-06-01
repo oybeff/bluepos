@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
 import { useAuth } from "@/context/auth";
+import { fmtDateNum, fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
@@ -52,7 +53,7 @@ const DEAL_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   yopildi:      { label: "Yopildi",        color: "#6B7280" },
 };
 
-function fmt(n: number) { return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm"; }
+function fmt(n: number) { return fmtNum(Math.round(n || 0)) + " so'm"; }
 function ago(d: string) {
   const diff = Date.now() - new Date(d).getTime();
   const days = Math.floor(diff / 86400000);
@@ -1045,7 +1046,7 @@ export default function SuperAdminScreen() {
 
         {allDeals.map((d: any) => {
           const stInfo = DEAL_STATUS_LABELS[d.status] || { label: d.status, color: "#6B7280" };
-          const date = d.createdAt ? new Date(d.createdAt).toLocaleDateString("uz-UZ") : "—";
+          const date = d.createdAt ? fmtDateNum(d.createdAt) : "—";
           return (
             <View key={d.id} style={[s.dealCard, { backgroundColor: C.card, borderColor: C.border }]}>
               <View style={s.dealCardTop}>

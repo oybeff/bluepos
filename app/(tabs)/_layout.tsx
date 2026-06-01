@@ -4,6 +4,9 @@ import React from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/context/auth";
+
+const ADMIN_ROLES = ["manager", "super_admin", "owner", "admin", "shop_owner"];
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -11,6 +14,9 @@ export default function TabLayout() {
   const isDark = colorScheme === "dark";
   const isWeb = Platform.OS === "web";
   const C = isDark ? Colors.dark : Colors.light;
+  const { user } = useAuth();
+  const isAdmin = user ? ADMIN_ROLES.includes(user.role) : false;
+  const isSeller = user?.role === "seller";
 
   return (
     <Tabs
@@ -41,6 +47,7 @@ export default function TabLayout() {
         ),
       }}
     >
+      {/* Position 1: Statistika — always visible */}
       <Tabs.Screen
         name="index"
         options={{
@@ -52,10 +59,25 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* Position 2: Sotuv (seller) or Mijoz oldiga (admin) */}
+      <Tabs.Screen
+        name="sotuv"
+        options={{
+          title: "Sotuv",
+          href: isSeller ? undefined : null,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? tabSt.activeWrap : null}>
+              <Feather name="shopping-cart" size={21} color={color} />
+            </View>
+          ),
+        }}
+      />
       <Tabs.Screen
         name="mijoz-oldiga"
         options={{
           title: "Mijoz oldiga",
+          href: isSeller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <View style={focused ? tabSt.activeWrap : null}>
               <Feather name="user-check" size={21} color={color} />
@@ -63,6 +85,8 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* Position 3: Calculator — always visible (center) */}
       <Tabs.Screen
         name="calculator"
         options={{
@@ -75,13 +99,42 @@ export default function TabLayout() {
           tabBarLabel: () => null,
         }}
       />
+
+      {/* Position 4: Mahsulotlar (seller) or Oldi-berdi (admin) */}
+      <Tabs.Screen
+        name="mahsulotlar"
+        options={{
+          title: "Mahsulotlar",
+          href: isSeller ? undefined : null,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? tabSt.activeWrap : null}>
+              <Feather name="box" size={21} color={color} />
+            </View>
+          ),
+        }}
+      />
       <Tabs.Screen
         name="oldi-berdi"
         options={{
           title: "Kirim",
+          href: isSeller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <View style={focused ? tabSt.activeWrap : null}>
               <Feather name="package" size={21} color={color} />
+            </View>
+          ),
+        }}
+      />
+
+      {/* Position 5: Davomat (seller) or Rasxodlar (admin) */}
+      <Tabs.Screen
+        name="davomat"
+        options={{
+          title: "Davomat",
+          href: isSeller ? undefined : null,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? tabSt.activeWrap : null}>
+              <Feather name="user-check" size={21} color={color} />
             </View>
           ),
         }}
@@ -90,6 +143,7 @@ export default function TabLayout() {
         name="rasxodlar"
         options={{
           title: "Rasxodlar",
+          href: isSeller ? null : (isAdmin ? undefined : null),
           tabBarIcon: ({ color, focused }) => (
             <View style={focused ? tabSt.activeWrap : null}>
               <Feather name="trending-down" size={21} color={color} />
@@ -99,9 +153,9 @@ export default function TabLayout() {
       />
 
       {/* Hidden screens */}
+      <Tabs.Screen name="lidlar"         options={{ href: null }} />
       <Tabs.Screen name="hisobot"        options={{ href: null }} />
       <Tabs.Screen name="xabarnomalar"   options={{ href: null }} />
-      <Tabs.Screen name="mahsulotlar"    options={{ href: null }} />
       <Tabs.Screen name="mijoz"          options={{ href: null }} />
       <Tabs.Screen name="orders"         options={{ href: null }} />
       <Tabs.Screen name="kassa"          options={{ href: null }} />
@@ -112,7 +166,6 @@ export default function TabLayout() {
       <Tabs.Screen name="profile"        options={{ href: null }} />
       <Tabs.Screen name="qarz-daftar"    options={{ href: null }} />
       <Tabs.Screen name="mijozlar"       options={{ href: null }} />
-      <Tabs.Screen name="sotuv"          options={{ href: null }} />
       <Tabs.Screen name="xodimlar"       options={{ href: null }} />
       <Tabs.Screen name="shaxsiy-xarajatlar" options={{ href: null }} />
     </Tabs>

@@ -9,11 +9,12 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum } from "../../../lib/date-utils";
 
 const C = Colors.light;
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 interface Worker { id: number; fullName: string; role: string; }
@@ -46,6 +47,52 @@ export default function EditDealScreen() {
     queryFn: () => apiReq("/workers"),
   });
 
+  const { data: allProducts = [] } = useQuery<{ id: number; name: string; pricePerUnit: number; price_per_unit?: number; stock: number; unit?: string }[]>({
+    queryKey: ["products"],
+    queryFn: () => apiReq("/products"),
+  });
+
+  const { data: dealProducts = [], refetch: refetchDp } = useQuery<{ id: number; product_name: string; qty: number; unit: string; price_per_unit: number; total: number; product_id: number | null }[]>({
+    queryKey: ["deal-products", id],
+    queryFn: () => apiReq(`/client-deals/${id}/products`),
+    enabled: !!id,
+  });
+
+  const [productSearch, setProductSearch] = useState("");
+  const [addingProduct, setAddingProduct] = useState(false);
+
+  const filteredProducts = productSearch.trim()
+    ? allProducts.filter(p =>
+        p.name.toLowerCase().includes(productSearch.toLowerCase())
+      ).slice(0, 6)
+    : [];
+
+  async function addDealProduct(p: { id: number; name: string; pricePerUnit: number; price_per_unit?: number; unit?: string }) {
+    setAddingProduct(true);
+    try {
+      const ppu = p.pricePerUnit || p.price_per_unit || 0;
+      await apiReq(`/client-deals/${id}/products`, {
+        method: "POST",
+        body: JSON.stringify({ product_id: p.id, product_name: p.name, qty: 1, unit: p.unit || "dona", price_per_unit: ppu }),
+      });
+      await refetchDp();
+      setProductSearch("");
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    } finally {
+      setAddingProduct(false);
+    }
+  }
+
+  async function removeDealProduct(dpId: number) {
+    try {
+      await apiReq(`/client-deals/${id}/products/${dpId}`, { method: "DELETE" });
+      await refetchDp();
+    } catch (e: any) {
+      Alert.alert("Xato", e.message);
+    }
+  }
+
   useEffect(() => {
     if (deal) {
       setForm({
@@ -70,7 +117,8 @@ export default function EditDealScreen() {
   const ornatish = parseFloat(form.ornatishNarx) || 0;
   const chevarPerM = parseFloat(form.chevarHaqiPerMetr) || 0;
   const chevarJami = chevarPerM * material;
-  const grandTotal = totalNarx + ornatish + chevarJami;
+  const dpTotal = dealProducts.reduce((s: number, p: any) => s + (p.total || 0), 0);
+  const grandTotal = totalNarx + ornatish + chevarJami + dpTotal;
   const zaklat = parseFloat(form.zaklatSumma) || 0;
   const qarz = Math.max(0, grandTotal - zaklat);
 
@@ -79,7 +127,7 @@ export default function EditDealScreen() {
     setSaving(true);
     try {
       await apiReq(`/client-deals/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         body: JSON.stringify({
           mijozIsm: form.mijozIsm.trim(),
           mijozPhone: form.mijozPhone.trim() || null,
@@ -248,6 +296,54 @@ export default function EditDealScreen() {
             placeholderTextColor={C.textSecondary}
             multiline
           />
+        </View>
+
+        {/* Mahsulotlar */}
+        <View style={[st.card, { borderColor: C.border }]}>
+          <Text style={[st.cardTitle, { color: C.text }]}>Mahsulotlar</Text>
+          <View style={[st.input, { borderColor: C.border, backgroundColor: C.card, flexDirection: "row", alignItems: "center", gap: 8 }]}>
+            <Feather name="search" size={16} color={C.textSecondary} />
+            <TextInput
+              style={{ flex: 1, fontSize: 14, color: C.text }}
+              value={productSearch}
+              onChangeText={setProductSearch}
+              placeholder="Mahsulot qidirish..."
+              placeholderTextColor={C.textSecondary}
+            />
+          </View>
+          {filteredProducts.length > 0 && (
+            <View style={{ borderWidth: 1, borderColor: C.border, borderRadius: 12, overflow: "hidden" }}>
+              {filteredProducts.map((p, i) => (
+                <TouchableOpacity
+                  key={p.id}
+                  disabled={addingProduct}
+                  style={{ flexDirection: "row", alignItems: "center", padding: 10, gap: 8,
+                    borderTopWidth: i > 0 ? 1 : 0, borderTopColor: C.border }}
+                  onPress={() => addDealProduct(p)}
+                >
+                  <Feather name="plus-circle" size={16} color={C.primary} />
+                  <Text style={{ flex: 1, fontSize: 13, color: C.text }} numberOfLines={1}>{p.name}</Text>
+                  <Text style={{ fontSize: 11, color: C.textSecondary }}>{fmt(p.pricePerUnit || p.price_per_unit || 0)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {dealProducts.length > 0 && (
+            <View style={{ gap: 6 }}>
+              {dealProducts.map(dp => (
+                <View key={dp.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 10, backgroundColor: C.background }}>
+                  <Feather name="box" size={14} color="#3B82F6" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "600", color: C.text }} numberOfLines={1}>{dp.product_name}</Text>
+                    <Text style={{ fontSize: 11, color: C.textSecondary }}>{dp.qty} {dp.unit} × {fmt(dp.price_per_unit)} = {fmt(dp.total)}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => removeDealProduct(dp.id)}>
+                    <Feather name="trash-2" size={14} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>

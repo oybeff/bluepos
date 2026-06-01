@@ -10,6 +10,7 @@ import Colors from "@/constants/colors";
 import { useRouter } from "expo-router";
 import { apiReq } from "@/lib/api";
 import { useAuth } from "@/context/auth";
+import { fmtDateNum, fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
@@ -42,11 +43,11 @@ const PERIOD_LABELS: Record<Period, string> = { today: "Bugun", week: "Hafta", m
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("uz-UZ");
+  return fmtDateNum(d);
 }
 function fmt(n?: number | null) {
   if (!n) return "—";
-  return n.toLocaleString("uz-UZ") + " so'm";
+  return fmtNum(n) + " so'm";
 }
 
 export default function HaydovchiPanel() {
@@ -370,7 +371,7 @@ function DelivCard({ deal, changing, onStatus, onMaps, onCall }: {
         </View>
         {deal.ornatishJami ? (
           <Text style={{ color: "#059669", fontFamily: "Inter_700Bold", fontSize: 15 }}>
-            {deal.ornatishJami.toLocaleString("uz-UZ")} so'm
+            {fmtNum(deal.ornatishJami)} so'm
           </Text>
         ) : null}
       </View>
@@ -412,7 +413,7 @@ function DelivCard({ deal, changing, onStatus, onMaps, onCall }: {
         {deal.totalNarx ? (
           <View style={[dc.tag, { backgroundColor: "#F0FDF4", borderColor: "#BBF7D0" }]}>
             <Text style={{ fontSize: 12, color: "#166534", fontFamily: "Inter_600SemiBold" }}>
-              💵 {deal.totalNarx.toLocaleString("uz-UZ")} so'm
+              💵 {fmtNum(deal.totalNarx)} so'm
             </Text>
           </View>
         ) : null}

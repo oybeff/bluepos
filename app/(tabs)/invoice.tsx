@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum, fmtDateNum } from "../../lib/date-utils";
 import * as Sharing from "expo-sharing";
 import * as Print from "expo-print";
 
@@ -31,7 +32,7 @@ interface InvoiceItem {
 const BIRLIKLAR = ["metr", "dona", "m²", "kg", "rulon"];
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n));
+  return fmtNum(Math.round(n));
 }
 
 function escHtml(s: string) {
@@ -39,7 +40,7 @@ function escHtml(s: string) {
 }
 
 function today() {
-  return new Date().toLocaleDateString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return fmtDateNum(new Date());
 }
 
 function invoiceNumber() {

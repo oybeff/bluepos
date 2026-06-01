@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Colors from "@/constants/colors";
+import { fmtNum } from "@/lib/date-utils";
 
 const C = Colors.light;
 
@@ -44,7 +45,7 @@ interface Product {
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 export default function Scanner() {

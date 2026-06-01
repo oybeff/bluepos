@@ -1,37 +1,37 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Platform,
+  TextInput, Alert, ActivityIndicator, Platform, Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import * as FileSystem from "expo-file-system";
 import DateInput, { buildDateStr } from "@/components/DateInput";
+import { fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
 const STEPS = [
   { id: 1, label: "Mijoz", icon: "user" as const },
-  { id: 2, label: "O'lcham", icon: "maximize" as const },
+  { id: 2, label: "Rasmlar", icon: "camera" as const },
   { id: 3, label: "Narx", icon: "tag" as const },
-  { id: 4, label: "To'lov", icon: "credit-card" as const },
-  { id: 5, label: "Ishchi", icon: "users" as const },
+  { id: 4, label: "Mahsulot", icon: "box" as const },
+  { id: 5, label: "To'lov", icon: "credit-card" as const },
 ];
 
-const ORNATISH_TURLARI = [
-  { key: "devor", label: "Devor", desc: "20 000 so'm", price: 20000 },
-  { key: "beton", label: "Beton", desc: "30 000 so'm", price: 30000 },
-  { key: "yo'q", label: "Yo'q", desc: "Bepul", price: 0 },
-];
 
+interface PhotoItem { uri: string; width: number; height: number; }
 interface Worker { id: number; fullName: string; role: string; }
-interface Measurement { key: string; value: string; }
+interface Product { id: number; name: string; pricePerUnit: number; price_per_unit?: number; stock: number; barcode?: string; category?: string; unit?: string; }
+interface DealProduct { productId: number; name: string; qty: number; unit: string; price: number; }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 function LabeledInput({ label, value, onChange, placeholder, keyboardType, multiline }: {
@@ -75,17 +75,21 @@ export default function NewDealScreen() {
   const [mijozPhone, setMijozPhone] = useState("");
   const [manzil, setManzil] = useState("");
 
-  // Step 2 — O'lchamlar
-  const [measurements, setMeasurements] = useState<Measurement[]>([
-    { key: "Eni", value: "" },
-    { key: "Balandligi", value: "" },
-  ]);
+  // Step 2 — Rasmlar
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
 
-  // Step 3 — Narx
+  // Step 3 — Narx + Tikuvchi
   const [totalMaterial, setTotalMaterial] = useState("");
   const [narxPerMetr, setNarxPerMetr] = useState("");
-  const [ornatishTuri, setOrnatishTuri] = useState("yo'q");
+  const [ornatishNarxi, setOrnatishNarxi] = useState("");
   const [chevarHaqiPerMetr, setChevarHaqiPerMetr] = useState("");
+  const [tailorId, setTailorId] = useState<number | null>(null);
+
+  const { data: workers = [] } = useQuery<Worker[]>({
+    queryKey: ["workers"],
+    queryFn: () => apiReq("/workers"),
+  });
+  const tailors = workers.filter(w => w.role === "tailor" || w.role === "seller" || w.role === "measurer");
 
   // Step 4 — To'lov
   const [zaklatSumma, setZaklatSumma] = useState("");
@@ -97,18 +101,19 @@ export default function NewDealScreen() {
   const [qarzYear, setQarzYear] = useState("");
   const [izoh, setIzoh] = useState("");
 
-  // Step 5 — Ishchilar
-  const [tailorId, setTailorId] = useState<number | null>(null);
-  const [installerId, setInstallerId] = useState<number | null>(null);
-
-  const { data: workers = [] } = useQuery<Worker[]>({
-    queryKey: ["workers"],
-    queryFn: () => apiReq("/workers"),
+  // Step 4 — Mahsulotlar
+  const [dealProducts, setDealProducts] = useState<DealProduct[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+  const { data: allProducts = [] } = useQuery<Product[]>({
+    queryKey: ["products"],
+    queryFn: () => apiReq("/products"),
   });
-
-  const tailors = workers.filter(w => w.role === "tailor" || w.role === "seller" || w.role === "measurer");
-  const installers = workers.filter(w => w.role === "installer");
-  const allForTailor = workers;
+  const filteredProducts = productSearch.trim()
+    ? allProducts.filter(p =>
+        p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+        (p.barcode && p.barcode.includes(productSearch))
+      ).slice(0, 8)
+    : [];
 
   // Calculations
   const mat = parseFloat(totalMaterial) || 0;
@@ -116,24 +121,34 @@ export default function NewDealScreen() {
   const chv = parseFloat(chevarHaqiPerMetr) || 0;
   const totalNarx = mat * npm;
   const chevarJami = mat * chv;
-  const ornatishObj = ORNATISH_TURLARI.find(o => o.key === ornatishTuri)!;
-  const ornatishNarx = ornatishObj?.price || 0;
-  const grandTotal = totalNarx + ornatishNarx + chevarJami;
+  const ornatishNarx = parseFloat(ornatishNarxi) || 0;
+  const productsTotal = dealProducts.reduce((s, p) => s + p.qty * p.price, 0);
+  const grandTotal = totalNarx + ornatishNarx + chevarJami + productsTotal;
   const zaklat = parseFloat(zaklatSumma) || 0;
   const qarz = Math.max(0, grandTotal - zaklat);
 
-  function addMeasurement() {
-    setMeasurements(prev => [...prev, { key: "", value: "" }]);
-  }
-  function removeMeasurement(idx: number) {
-    setMeasurements(prev => prev.filter((_, i) => i !== idx));
-  }
-  function updateMeasurement(idx: number, field: "key" | "value", val: string) {
-    setMeasurements(prev => {
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], [field]: val };
-      return updated;
+  async function pickPhotos() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      quality: 0.8,
     });
+    if (!result.canceled) {
+      setPhotos(prev => [...prev, ...result.assets.map(a => ({ uri: a.uri, width: a.width, height: a.height }))]);
+    }
+  }
+
+  async function takePhoto() {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Xato", "Kamera ruxsati kerak"); return; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (!result.canceled) {
+      setPhotos(prev => [...prev, ...result.assets.map(a => ({ uri: a.uri, width: a.width, height: a.height }))]);
+    }
+  }
+
+  function removePhoto(idx: number) {
+    setPhotos(prev => prev.filter((_, i) => i !== idx));
   }
 
   function validateStep(): string | null {
@@ -159,36 +174,60 @@ export default function NewDealScreen() {
 
     setSaving(true);
     try {
-      const measurementsObj: Record<string, string> = {};
-      measurements.filter(m => m.key && m.value).forEach(m => {
-        measurementsObj[m.key] = m.value;
-      });
-
       const body = {
         mijozIsm: mijozIsm.trim() || null,
         mijozPhone: mijozPhone.trim() || null,
         manzil: manzil.trim() || null,
-        measurements: Object.keys(measurementsObj).length ? measurementsObj : null,
-        totalMaterial: mat,
-        narxPerMetr: npm,
+        materialJami: mat,
+        narxMetr: npm,
         totalNarx,
-        ornatishTuri: ornatishTuri === "yo'q" ? null : ornatishTuri,
-        ornatishNarx,
-        chevarHaqiPerMetr: chv,
-        chevarJami,
-        zaklatSumma: zaklat,
+        ornatishTuri: ornatishNarx > 0 ? "devor" : null,
+        tikuvchiNarxMetr: chv,
+        zaklat: zaklat,
         qarzSumma: qarz,
-        tayyorBolishKuni: buildDateStr(tayyorDay, tayyorMonth, tayyorYear) || null,
-        qarzKaytarishKuni: buildDateStr(qarzDay, qarzMonth, qarzYear) || null,
+        tayyorSana: buildDateStr(tayyorDay, tayyorMonth, tayyorYear) || null,
+        qarzQaytarishSana: buildDateStr(qarzDay, qarzMonth, qarzYear) || null,
         izoh: izoh.trim() || null,
-        tailorWorkerId: tailorId,
-        installerWorkerId: installerId,
+        tikuvchiId: tailorId,
       };
 
       const created = await apiReq("/client-deals", {
         method: "POST",
         body: JSON.stringify(body),
       }) as any;
+
+      // Upload photos as base64
+      const dealId = created.deal?.id ?? created.id;
+      if (photos.length > 0) {
+        for (const p of photos) {
+          try {
+            const b64 = await FileSystem.readAsStringAsync(p.uri, { encoding: 'base64' as any });
+            const ext = p.uri.split(".").pop() || "jpg";
+            await apiReq(`/client-deals/${dealId}/photos`, {
+              method: "POST",
+              body: JSON.stringify({ base64: b64, filename: `photo.${ext}` }),
+            });
+          } catch {}
+        }
+      }
+
+      // Save deal products
+      if (dealProducts.length > 0) {
+        for (const dp of dealProducts) {
+          try {
+            await apiReq(`/client-deals/${dealId}/products`, {
+              method: "POST",
+              body: JSON.stringify({
+                product_id: dp.productId,
+                product_name: dp.name,
+                qty: dp.qty,
+                unit: dp.unit,
+                price_per_unit: dp.price,
+              }),
+            });
+          } catch {}
+        }
+      }
 
       // Agar qarz bo'lsa — qarz daftariga avtomatik qo'shish
       if (qarz > 0) {
@@ -275,40 +314,49 @@ export default function NewDealScreen() {
           </View>
         )}
 
-        {/* ── STEP 2: O'lchamlar ── */}
+        {/* ── STEP 2: Rasmlar ── */}
         {step === 2 && (
           <View style={{ gap: 14 }}>
-            <SectionHeader icon="maximize" title="O'lchamlar" />
-            {measurements.map((m, idx) => (
-              <View key={idx} style={[s.measureRow, { borderColor: C.border }]}>
-                <TextInput
-                  style={[s.measureKey, { color: C.text, borderColor: C.border }]}
-                  value={m.key}
-                  onChangeText={v => updateMeasurement(idx, "key", v)}
-                  placeholder="Nom (Eni)"
-                  placeholderTextColor={C.textSecondary}
-                />
-                <TextInput
-                  style={[s.measureVal, { color: C.text, borderColor: C.border }]}
-                  value={m.value}
-                  onChangeText={v => updateMeasurement(idx, "value", v)}
-                  placeholder="Qiymat"
-                  placeholderTextColor={C.textSecondary}
-                  keyboardType="decimal-pad"
-                />
-                <TouchableOpacity
-                  style={[s.measureDel, { backgroundColor: "#FEF2F2" }]}
-                  onPress={() => removeMeasurement(idx)}
-                  disabled={measurements.length === 1}
-                >
-                  <Feather name="minus" size={16} color="#DC2626" />
-                </TouchableOpacity>
+            <SectionHeader icon="camera" title="Hisob-kitob rasmlari" />
+            <Text style={{ fontSize: 13, color: C.textSecondary, fontFamily: "Inter_400Regular" }}>
+              Daftardagi hisob-kitob yoki o'lchamlarni rasmga oling yoki galereyadan yuklang
+            </Text>
+
+            {photos.length > 0 && (
+              <View style={s.photoGrid}>
+                {photos.map((p, idx) => (
+                  <View key={idx} style={s.photoWrap}>
+                    <Image source={{ uri: p.uri }} style={s.photoImg} />
+                    <TouchableOpacity style={s.photoDel} onPress={() => removePhoto(idx)}>
+                      <Feather name="x" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
               </View>
-            ))}
-            <TouchableOpacity style={[s.addBtn, { borderColor: C.primary }]} onPress={addMeasurement}>
-              <Feather name="plus" size={16} color={C.primary} />
-              <Text style={[s.addBtnTxt, { color: C.primary }]}>O'lcham qo'shish</Text>
-            </TouchableOpacity>
+            )}
+
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity style={[s.photoBtn, { borderColor: C.primary, flex: 1 }]} onPress={takePhoto}>
+                <Feather name="camera" size={20} color={C.primary} />
+                <Text style={[s.photoBtnTxt, { color: C.primary }]}>Kamera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.photoBtn, { borderColor: C.primary, flex: 1 }]} onPress={pickPhotos}>
+                <Feather name="image" size={20} color={C.primary} />
+                <Text style={[s.photoBtnTxt, { color: C.primary }]}>Galereya</Text>
+              </TouchableOpacity>
+            </View>
+
+            {photos.length === 0 && (
+              <View style={[s.photoEmpty, { backgroundColor: C.surface, borderColor: C.border }]}>
+                <Feather name="image" size={40} color={C.textSecondary} />
+                <Text style={{ fontSize: 14, color: C.textSecondary, fontFamily: "Inter_500Medium", marginTop: 8 }}>
+                  Hali rasm yuklanmagan
+                </Text>
+                <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_400Regular", textAlign: "center", marginTop: 4 }}>
+                  2-3 yoki ko'proq rasm yuklang
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -319,21 +367,31 @@ export default function NewDealScreen() {
             <LabeledInput label="Umumiy material (metr)" value={totalMaterial} onChange={setTotalMaterial} keyboardType="decimal-pad" placeholder="0.00" />
             <LabeledInput label="Narx (1 metr)" value={narxPerMetr} onChange={setNarxPerMetr} keyboardType="decimal-pad" placeholder="0" />
             <LabeledInput label="Tikuvchi haqi (1 metrga)" value={chevarHaqiPerMetr} onChange={setChevarHaqiPerMetr} keyboardType="decimal-pad" placeholder="0" />
+            <LabeledInput label="O'rnatish xizmati narxi" value={ornatishNarxi} onChange={setOrnatishNarxi} keyboardType="decimal-pad" placeholder="0" />
 
+            {/* Tikuvchi tanlash */}
             <View style={li.wrap}>
-              <Text style={[li.label, { color: C.textSecondary }]}>O'rnatish turi</Text>
-              <View style={s.ornatishRow}>
-                {ORNATISH_TURLARI.map(ot => (
+              <Text style={[li.label, { color: C.textSecondary }]}>✂️ Tikuvchi</Text>
+              <View style={s.tailorList}>
+                <TouchableOpacity
+                  style={[s.tailorBtn, {
+                    borderColor: tailorId === null ? C.primary : C.border,
+                    backgroundColor: tailorId === null ? C.surface : C.card,
+                  }]}
+                  onPress={() => setTailorId(null)}
+                >
+                  <Text style={[s.tailorBtnTxt, { color: tailorId === null ? C.primary : C.textSecondary }]}>Belgilanmagan</Text>
+                </TouchableOpacity>
+                {(tailors.length > 0 ? tailors : workers).map(w => (
                   <TouchableOpacity
-                    key={ot.key}
-                    style={[s.ornatishBtn, {
-                      borderColor: ornatishTuri === ot.key ? C.primary : C.border,
-                      backgroundColor: ornatishTuri === ot.key ? C.surface : C.card,
+                    key={w.id}
+                    style={[s.tailorBtn, {
+                      borderColor: tailorId === w.id ? C.primary : C.border,
+                      backgroundColor: tailorId === w.id ? C.surface : C.card,
                     }]}
-                    onPress={() => setOrnatishTuri(ot.key)}
+                    onPress={() => setTailorId(w.id)}
                   >
-                    <Text style={[s.ornatishLbl, { color: ornatishTuri === ot.key ? C.primary : C.text }]}>{ot.label}</Text>
-                    <Text style={[s.ornatishDesc, { color: C.textSecondary }]}>{ot.desc}</Text>
+                    <Text style={[s.tailorBtnTxt, { color: tailorId === w.id ? C.primary : C.text }]}>{w.fullName}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -368,8 +426,113 @@ export default function NewDealScreen() {
           </View>
         )}
 
-        {/* ── STEP 4: To'lov ── */}
+        {/* ── STEP 4: Mahsulotlar ── */}
         {step === 4 && (
+          <View style={{ gap: 14 }}>
+            <SectionHeader icon="box" title="Mahsulotlar (ixtiyoriy)" />
+            <Text style={{ fontSize: 13, color: C.textSecondary, fontFamily: "Inter_400Regular" }}>
+              Buyurtmaga aksessuar yoki tayyor mahsulot qo'shing — ombordagi stock avtomatik kamayadi
+            </Text>
+
+            {/* Search */}
+            <View style={[li.input, { flexDirection: "row", alignItems: "center", gap: 8, borderColor: C.border, backgroundColor: C.card }]}>
+              <Feather name="search" size={16} color={C.textSecondary} />
+              <TextInput
+                style={{ flex: 1, fontSize: 14, fontFamily: "Inter_400Regular", color: C.text }}
+                value={productSearch}
+                onChangeText={setProductSearch}
+                placeholder="Mahsulot qidirish..."
+                placeholderTextColor={C.textSecondary}
+              />
+              {productSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setProductSearch("")}>
+                  <Feather name="x" size={16} color={C.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Search results */}
+            {filteredProducts.length > 0 && (
+              <View style={{ borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.card, overflow: "hidden" }}>
+                {filteredProducts.map((p, i) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10,
+                      borderTopWidth: i > 0 ? 1 : 0, borderTopColor: C.border }}
+                    onPress={() => {
+                      if (dealProducts.find(dp => dp.productId === p.id)) return;
+                      setDealProducts(prev => [...prev, {
+                        productId: p.id, name: p.name, qty: 1,
+                        unit: p.unit || "dona", price: p.pricePerUnit || p.price_per_unit || 0,
+                      }]);
+                      setProductSearch("");
+                    }}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#EFF6FF", alignItems: "center", justifyContent: "center" }}>
+                      <Feather name="box" size={16} color="#3B82F6" />
+                    </View>
+                    <View style={{ flex: 1, gap: 1 }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.text }} numberOfLines={1}>{p.name}</Text>
+                      <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: C.textSecondary }}>
+                        {fmt(p.pricePerUnit || p.price_per_unit || 0)} • Omborda: {p.stock}
+                      </Text>
+                    </View>
+                    {dealProducts.find(dp => dp.productId === p.id) ? (
+                      <Feather name="check-circle" size={18} color="#10B981" />
+                    ) : (
+                      <Feather name="plus-circle" size={18} color={C.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Selected products */}
+            {dealProducts.length > 0 && (
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: C.textSecondary }}>
+                  Tanlangan ({dealProducts.length})
+                </Text>
+                {dealProducts.map((dp, idx) => (
+                  <View key={dp.productId} style={{ flexDirection: "row", alignItems: "center", gap: 8,
+                    padding: 12, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.card }}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.text }} numberOfLines={1}>{dp.name}</Text>
+                      <Text style={{ fontSize: 11, fontFamily: "Inter_400Regular", color: C.textSecondary }}>
+                        {fmt(dp.price)} × {dp.qty} = {fmt(dp.qty * dp.price)}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <TouchableOpacity
+                        style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" }}
+                        onPress={() => setDealProducts(prev => prev.map((p, i) => i === idx ? { ...p, qty: Math.max(1, p.qty - 1) } : p))}
+                      >
+                        <Feather name="minus" size={14} color={C.text} />
+                      </TouchableOpacity>
+                      <Text style={{ fontSize: 16, fontFamily: "Inter_700Bold", color: C.text, minWidth: 24, textAlign: "center" }}>{dp.qty}</Text>
+                      <TouchableOpacity
+                        style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: C.surface, alignItems: "center", justifyContent: "center" }}
+                        onPress={() => setDealProducts(prev => prev.map((p, i) => i === idx ? { ...p, qty: p.qty + 1 } : p))}
+                      >
+                        <Feather name="plus" size={14} color={C.text} />
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity onPress={() => setDealProducts(prev => prev.filter((_, i) => i !== idx))}>
+                      <Feather name="trash-2" size={16} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4, paddingTop: 4 }}>
+                  <Text style={{ fontSize: 13, fontFamily: "Inter_600SemiBold", color: C.textSecondary }}>Mahsulotlar jami:</Text>
+                  <Text style={{ fontSize: 14, fontFamily: "Inter_700Bold", color: C.primary }}>{fmt(productsTotal)}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── STEP 5: To'lov ── */}
+        {step === 5 && (
           <View style={{ gap: 14 }}>
             <SectionHeader icon="credit-card" title="To'lov va sanalar" />
 
@@ -405,87 +568,17 @@ export default function NewDealScreen() {
           </View>
         )}
 
-        {/* ── STEP 5: Ishchilar ── */}
-        {step === 5 && (
-          <View style={{ gap: 14 }}>
-            <SectionHeader icon="users" title="Ishchilarni belgilash" />
-
-            <View style={li.wrap}>
-              <Text style={[li.label, { color: C.textSecondary }]}>Tikuvchi</Text>
-              <View style={s.workerList}>
-                <TouchableOpacity
-                  style={[s.workerBtn, {
-                    borderColor: tailorId === null ? C.primary : C.border,
-                    backgroundColor: tailorId === null ? C.surface : C.card,
-                  }]}
-                  onPress={() => setTailorId(null)}
-                >
-                  <Text style={[s.workerBtnTxt, { color: tailorId === null ? C.primary : C.textSecondary }]}>Belgilanmagan</Text>
-                </TouchableOpacity>
-                {allForTailor.map(w => (
-                  <TouchableOpacity
-                    key={w.id}
-                    style={[s.workerBtn, {
-                      borderColor: tailorId === w.id ? C.primary : C.border,
-                      backgroundColor: tailorId === w.id ? C.surface : C.card,
-                    }]}
-                    onPress={() => setTailorId(w.id)}
-                  >
-                    <Text style={[s.workerBtnTxt, { color: tailorId === w.id ? C.primary : C.text }]}>{w.fullName}</Text>
-                    <Text style={[s.workerRole, { color: C.textSecondary }]}>{w.role}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={li.wrap}>
-              <Text style={[li.label, { color: C.textSecondary }]}>O'rnatuvchi</Text>
-              <View style={s.workerList}>
-                <TouchableOpacity
-                  style={[s.workerBtn, {
-                    borderColor: installerId === null ? C.primary : C.border,
-                    backgroundColor: installerId === null ? C.surface : C.card,
-                  }]}
-                  onPress={() => setInstallerId(null)}
-                >
-                  <Text style={[s.workerBtnTxt, { color: installerId === null ? C.primary : C.textSecondary }]}>Belgilanmagan</Text>
-                </TouchableOpacity>
-                {installers.length === 0 && workers.map(w => (
-                  <TouchableOpacity
-                    key={w.id}
-                    style={[s.workerBtn, {
-                      borderColor: installerId === w.id ? C.primary : C.border,
-                      backgroundColor: installerId === w.id ? C.surface : C.card,
-                    }]}
-                    onPress={() => setInstallerId(w.id)}
-                  >
-                    <Text style={[s.workerBtnTxt, { color: installerId === w.id ? C.primary : C.text }]}>{w.fullName}</Text>
-                  </TouchableOpacity>
-                ))}
-                {installers.map(w => (
-                  <TouchableOpacity
-                    key={w.id}
-                    style={[s.workerBtn, {
-                      borderColor: installerId === w.id ? C.primary : C.border,
-                      backgroundColor: installerId === w.id ? C.surface : C.card,
-                    }]}
-                    onPress={() => setInstallerId(w.id)}
-                  >
-                    <Text style={[s.workerBtnTxt, { color: installerId === w.id ? C.primary : C.text }]}>{w.fullName}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Summary */}
-            <View style={[s.summary, { backgroundColor: C.surface, borderColor: C.border }]}>
-              <Text style={[s.summaryTitle, { color: C.text }]}>Xulosa</Text>
-              <SummaryRow label="Mijoz" value={mijozIsm || mijozPhone || "—"} />
-              <SummaryRow label="Material" value={`${mat} m × ${fmt(npm)}`} />
-              <SummaryRow label="Jami" value={fmt(grandTotal)} bold />
-              <SummaryRow label="Zaklat" value={fmt(zaklat)} />
-              <SummaryRow label="Qarz" value={fmt(qarz)} color={qarz > 0 ? "#DC2626" : "#059669"} />
-            </View>
+        {/* ── Summary (shown in step 5) ── */}
+        {step === 5 && grandTotal > 0 && (
+          <View style={[s.summary, { backgroundColor: C.surface, borderColor: C.border }]}>
+            <Text style={[s.summaryTitle, { color: C.text }]}>Xulosa</Text>
+            <SummaryRow label="Mijoz" value={mijozIsm || mijozPhone || "—"} />
+            <SummaryRow label="Rasmlar" value={`${photos.length} ta`} />
+            <SummaryRow label="Material" value={`${mat} m × ${fmt(npm)}`} />
+            {dealProducts.length > 0 && <SummaryRow label="Mahsulotlar" value={`${dealProducts.length} ta — ${fmt(productsTotal)}`} />}
+            <SummaryRow label="Jami" value={fmt(grandTotal)} bold />
+            <SummaryRow label="Zaklat" value={fmt(zaklat)} />
+            <SummaryRow label="Qarz" value={fmt(qarz)} color={qarz > 0 ? "#DC2626" : "#059669"} />
           </View>
         )}
 
@@ -558,17 +651,17 @@ const s = StyleSheet.create({
   stepDot: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   stepLbl: { fontSize: 9, fontFamily: "Inter_500Medium", textAlign: "center" },
 
-  measureRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  measureKey: { flex: 1, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, fontFamily: "Inter_400Regular" },
-  measureVal: { flex: 1, borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, fontFamily: "Inter_400Regular" },
-  measureDel: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  addBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderRadius: 12, paddingVertical: 12, borderStyle: "dashed" },
-  addBtnTxt: { fontSize: 14, fontFamily: "Inter_500Medium" },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  photoWrap: { width: 100, height: 100, borderRadius: 12, overflow: "hidden" },
+  photoImg: { width: "100%", height: "100%", borderRadius: 12 },
+  photoDel: { position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
+  photoBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderRadius: 12, paddingVertical: 14, borderStyle: "dashed" as any },
+  photoBtnTxt: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  photoEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: 40, borderRadius: 16, borderWidth: 1, borderStyle: "dashed" as any },
 
-  ornatishRow: { flexDirection: "row", gap: 8 },
-  ornatishBtn: { flex: 1, borderWidth: 1.5, borderRadius: 12, padding: 10, alignItems: "center", gap: 2 },
-  ornatishLbl: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  ornatishDesc: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  tailorList: { gap: 8 },
+  tailorBtn: { borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, alignItems: "center" },
+  tailorBtnTxt: { fontSize: 14, fontFamily: "Inter_500Medium" },
 
   calcCard: { borderRadius: 16, padding: 16, gap: 8 },
   calcTitle: { fontSize: 13, color: "rgba(255,255,255,0.7)", fontFamily: "Inter_400Regular", marginBottom: 4 },
@@ -583,11 +676,6 @@ const s = StyleSheet.create({
   payInfoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   payInfoLbl: { fontSize: 13, fontFamily: "Inter_400Regular" },
   payInfoVal: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-
-  workerList: { gap: 8 },
-  workerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
-  workerBtnTxt: { fontSize: 14, fontFamily: "Inter_500Medium" },
-  workerRole: { fontSize: 11, fontFamily: "Inter_400Regular" },
 
   summary: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 2 },
   summaryTitle: { fontSize: 14, fontFamily: "Inter_700Bold", marginBottom: 6 },

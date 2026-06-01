@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum, fmtDate as fmtDateUtil, fmtDateTime } from "../../lib/date-utils";
 import DateInput, { buildDateStr } from "@/components/DateInput";
 import * as Location from "expo-location";
 import * as Print from "expo-print";
@@ -83,7 +84,7 @@ const QOSHIMCHA_BOY = 0.3;
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function m(v: number) { return v.toFixed(2) + " m"; }
-function sum(v: number) { return new Intl.NumberFormat("uz-UZ").format(Math.round(v)) + " so'm"; }
+function sum(v: number) { return fmtNum(Math.round(v)) + " so'm"; }
 function p(s: string) { return parseFloat(s) || 0; }
 
 function newKarniizItem(turi: KarniizTuri): KarniizItem {
@@ -440,7 +441,7 @@ export default function MijozOldigaScreen() {
     if (!totalJami) { Alert.alert("Xato", "O'lchamlarni kiriting"); return; }
     setPdfLoading(true);
     try {
-      const date = new Date().toLocaleDateString("uz-UZ", { year: "numeric", month: "long", day: "numeric" });
+      const date = fmtDateUtil(new Date(), { month: "long", year: true });
       const tailor = workers.find(w => w.id === selectedTailor);
       const rowsHtml = flatItems.map(({ room, item, calc }, i) =>
         `<tr>
@@ -525,7 +526,7 @@ export default function MijozOldigaScreen() {
   </div>
   <div class="sig">
     <div>Chevar imzosi: ________________</div>
-    <div style="margin-top:4px;font-size:8px;color:#cbd5e1">Bluepos | ${new Date().toLocaleString("uz-UZ")}</div>
+    <div style="margin-top:4px;font-size:8px;color:#cbd5e1">Bluepos | ${fmtDateTime(new Date())}</div>
   </div>
 </div>
 </body></html>`;
@@ -548,7 +549,7 @@ export default function MijozOldigaScreen() {
     if (!totalJami) { Alert.alert("Xato", "O'lchamlarni kiriting"); return; }
     setPdfLoading(true);
     try {
-      const date = new Date().toLocaleDateString("uz-UZ", { year: "numeric", month: "long", day: "numeric" });
+      const date = fmtDateUtil(new Date(), { month: "long", year: true });
       const ornatishLabel = ORNATISH_TURLARI.find(t => t.id === ornatishTuri)?.label || "";
 
       const rowsHtml = flatItems.map(({ room, item, calc }, i) => {
@@ -571,20 +572,20 @@ export default function MijozOldigaScreen() {
         const kTotal = calcKarniiz(k);
         const uzL = (p(k.uzunlik) / 100).toFixed(2);
         const parts: string[] = [];
-        if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni} × ${p(k.kronshteyn.narxi).toLocaleString("uz-UZ")}`);
-        if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni} × ${p(k.kruchka.narxi).toLocaleString("uz-UZ")}`);
-        if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${p(k.gulOyoq.narxi).toLocaleString("uz-UZ")}`);
-        if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni} × ${p(k.derjatel.narxi).toLocaleString("uz-UZ")}`);
-        if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni} × ${p(k.babon.narxi).toLocaleString("uz-UZ")}`);
-        if (k.popik.enabled) parts.push(`Popik: ${p(k.popik.narxi).toLocaleString("uz-UZ")}`);
-        if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m × ${p(k.tikuv.narxi).toLocaleString("uz-UZ")}`);
+        if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni} × ${fmtNum(p(k.kronshteyn.narxi))}`);
+        if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni} × ${fmtNum(p(k.kruchka.narxi))}`);
+        if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${fmtNum(p(k.gulOyoq.narxi))}`);
+        if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni} × ${fmtNum(p(k.derjatel.narxi))}`);
+        if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni} × ${fmtNum(p(k.babon.narxi))}`);
+        if (k.popik.enabled) parts.push(`Popik: ${fmtNum(p(k.popik.narxi))}`);
+        if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m × ${fmtNum(p(k.tikuv.narxi))}`);
         return `<tr>
           <td style="text-align:center">${i + 1}</td>
           <td>${k.turi === "karniiz" ? "Karniiz" : "Baget"}</td>
           <td>${k.nomi}</td>
           <td style="text-align:center">${uzL} m</td>
           <td style="font-size:10px;color:#64748b">${parts.join("; ") || "—"}</td>
-          <td style="text-align:right;font-weight:700;color:#4338ca">${kTotal.toLocaleString("uz-UZ")} so'm</td>
+          <td style="text-align:right;font-weight:700;color:#4338ca">${fmtNum(kTotal)} so'm</td>
         </tr>`;
       }).join("") : "";
 
@@ -675,7 +676,7 @@ ${karniizList.length > 0 ? `<div class="sec">
       ${karniizRowsHtml}
       <tr class="tr-total">
         <td colspan="5" style="text-align:right">KARNIIZ JAMI:</td>
-        <td style="text-align:right;font-size:13px">${karniizTotal.toLocaleString("uz-UZ")} so'm</td>
+        <td style="text-align:right;font-size:13px">${fmtNum(karniizTotal)} so'm</td>
       </tr>
     </tbody>
   </table>
@@ -687,40 +688,40 @@ ${karniizList.length > 0 ? `<div class="sec">
     ${flatItems.filter(fi => p(fi.item.narxi) > 0).map(({ room, item, calc }) => {
         const iNarx = p(item.narxi);
         return `<div class="narx-row">
-          <span class="narx-lbl">${room.name} · ${item.label} (${calc.jami.toFixed(2)} m × ${iNarx.toLocaleString("uz-UZ")} so'm/m)</span>
-          <span class="narx-val">${(iNarx * calc.jami).toLocaleString("uz-UZ")} so'm</span>
+          <span class="narx-lbl">${room.name} · ${item.label} (${calc.jami.toFixed(2)} m × ${fmtNum(iNarx)} so'm/m)</span>
+          <span class="narx-val">${fmtNum(iNarx * calc.jami)} so'm</span>
         </div>`;
       }).join("")}
     ${ornatishJami > 0 ? `<div class="narx-row">
-      <span class="narx-lbl">O'rnatish — ${ornatishLabel} (${jmDona} ta × ${ornatishNarx.toLocaleString("uz-UZ")} so'm)</span>
-      <span class="narx-val">${ornatishJami.toLocaleString("uz-UZ")} so'm</span>
+      <span class="narx-lbl">O'rnatish — ${ornatishLabel} (${jmDona} ta × ${fmtNum(ornatishNarx)} so'm)</span>
+      <span class="narx-val">${fmtNum(ornatishJami)} so'm</span>
     </div>` : ""}
     ${chevarJami > 0 ? `<div class="narx-row">
-      <span class="narx-lbl">Chevar haqi (${totalJami.toFixed(2)} m × ${chevarHaqi.toLocaleString("uz-UZ")} so'm/m)</span>
-      <span class="narx-val">${chevarJami.toLocaleString("uz-UZ")} so'm</span>
+      <span class="narx-lbl">Chevar haqi (${totalJami.toFixed(2)} m × ${fmtNum(chevarHaqi)} so'm/m)</span>
+      <span class="narx-val">${fmtNum(chevarJami)} so'm</span>
     </div>` : ""}
     ${karniizTotal > 0 ? `<div class="narx-row">
       <span class="narx-lbl">Karniiz va Baget (${karniizList.length} dona)</span>
-      <span class="narx-val">${karniizTotal.toLocaleString("uz-UZ")} so'm</span>
+      <span class="narx-val">${fmtNum(karniizTotal)} so'm</span>
     </div>` : ""}
   </div>
 
   <div class="grand-box">
     <span class="grand-lbl">UMUMIY NARX (JAMI):</span>
-    <span class="grand-val">${grandTotal.toLocaleString("uz-UZ")} so'm</span>
+    <span class="grand-val">${fmtNum(grandTotal)} so'm</span>
   </div>
 
   <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
     ${zaklat > 0 ? `<div class="pay-row" style="background:#f0fdf4;border-bottom:1px solid #bbf7d0">
       <span style="font-size:12px;color:#166534;font-weight:600">Naqd to'lov (zaklat)</span>
-      <span style="font-size:14px;font-weight:900;color:#16a34a">${zaklat.toLocaleString("uz-UZ")} so'm</span>
+      <span style="font-size:14px;font-weight:900;color:#16a34a">${fmtNum(zaklat)} so'm</span>
     </div>` : ""}
     <div class="pay-row" style="background:${qarz > 0 ? "#fef2f2" : "#f0fdf4"}">
       <div>
         <span style="font-size:12px;color:${qarz > 0 ? "#991b1b" : "#166534"};font-weight:700">${qarz > 0 ? "Qolgan qarz" : "To'liq to'langan"}</span>
         ${qaytarishMuddati && qarz > 0 ? `<div style="font-size:10px;color:#dc2626;margin-top:2px">Qaytarish muddati: ${qaytarishMuddati}</div>` : ""}
       </div>
-      <span style="font-size:${qarz > 0 ? "18px" : "14px"};font-weight:900;color:${qarz > 0 ? "#dc2626" : "#16a34a"}">${qarz > 0 ? qarz.toLocaleString("uz-UZ") + " so'm" : "✓"}</span>
+      <span style="font-size:${qarz > 0 ? "18px" : "14px"};font-weight:900;color:${qarz > 0 ? "#dc2626" : "#16a34a"}">${qarz > 0 ? fmtNum(qarz) + " so'm" : "✓"}</span>
     </div>
   </div>
 </div>
@@ -743,7 +744,7 @@ ${tayyorKun || qaytarishMuddati || izoh ? `<div class="sec">
   </div>
 </div>
 
-<div class="foot">Bluepos tizimi | ${new Date().toLocaleString("uz-UZ")}</div>
+<div class="foot">Bluepos tizimi | ${fmtDateTime(new Date())}</div>
 </body></html>`;
 
       const { uri } = await Print.printToFileAsync({ html, base64: false });
@@ -764,7 +765,7 @@ ${tayyorKun || qaytarishMuddati || izoh ? `<div class="sec">
     if (!totalJami) { Alert.alert("Xato", "O'lchamlarni kiriting"); return; }
     setExcelLoading(true);
     try {
-      const date = new Date().toLocaleDateString("uz-UZ");
+      const date = fmtDateUtil(new Date(), { month: "long", year: true });
       const ornatishLabel = ORNATISH_TURLARI.find(t => t.id === ornatishTuri)?.label || "Yo'q";
 
       const esc = (v: string | number) => {
@@ -809,13 +810,13 @@ ${tayyorKun || qaytarishMuddati || izoh ? `<div class="sec">
           const kTotal = calcKarniiz(k);
           const uzL = (p(k.uzunlik) / 100).toFixed(2);
           const parts: string[] = [];
-          if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni}×${p(k.kronshteyn.narxi).toLocaleString("uz-UZ")}`);
-          if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni}×${p(k.kruchka.narxi).toLocaleString("uz-UZ")}`);
-          if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${p(k.gulOyoq.narxi).toLocaleString("uz-UZ")}`);
-          if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni}×${p(k.derjatel.narxi).toLocaleString("uz-UZ")}`);
-          if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni}×${p(k.babon.narxi).toLocaleString("uz-UZ")}`);
-          if (k.popik.enabled) parts.push(`Popik: ${p(k.popik.narxi).toLocaleString("uz-UZ")}`);
-          if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m×${p(k.tikuv.narxi).toLocaleString("uz-UZ")}`);
+          if (k.kronshteyn.enabled) parts.push(`Kronshteyn: ${k.kronshteyn.soni}×${fmtNum(p(k.kronshteyn.narxi))}`);
+          if (k.kruchka.enabled) parts.push(`Kruchka: ${k.kruchka.soni}×${fmtNum(p(k.kruchka.narxi))}`);
+          if (k.gulOyoq.enabled) parts.push(`Gul oyoq: ${fmtNum(p(k.gulOyoq.narxi))}`);
+          if (k.derjatel.enabled) parts.push(`Derjatel: ${k.derjatel.soni}×${fmtNum(p(k.derjatel.narxi))}`);
+          if (k.babon.enabled) parts.push(`Babon: ${k.babon.soni}×${fmtNum(p(k.babon.narxi))}`);
+          if (k.popik.enabled) parts.push(`Popik: ${fmtNum(p(k.popik.narxi))}`);
+          if (k.tikuv.enabled) parts.push(`Tikuv: ${(p(k.tikuv.uzunlik)/100).toFixed(2)}m×${fmtNum(p(k.tikuv.narxi))}`);
           lines.push(row(i + 1, k.turi === "karniiz" ? "Karniiz" : "Baget", k.nomi, uzL, parts.join("; ") || "—", kTotal));
         });
         lines.push(row("", "", "", "", "KARNIIZ JAMI:", karniizTotal));
@@ -827,11 +828,11 @@ ${tayyorKun || qaytarishMuddati || izoh ? `<div class="sec">
       flatItems.forEach(({ room, item, calc }) => {
         const iNarx = p(item.narxi);
         if (iNarx > 0 && calc.jami > 0) {
-          lines.push(row("Parda matosi", `${room.name} · ${item.label}: ${calc.jami.toFixed(2)} m × ${iNarx.toLocaleString("uz-UZ")} so'm/m`, iNarx * calc.jami));
+          lines.push(row("Parda matosi", `${room.name} · ${item.label}: ${calc.jami.toFixed(2)} m × ${fmtNum(iNarx)} so'm/m`, iNarx * calc.jami));
         }
       });
-      if (ornatishJami > 0) lines.push(row("O'rnatish", `${ornatishLabel} — ${jmDona} ta × ${ornatishNarx.toLocaleString("uz-UZ")} so'm`, ornatishJami));
-      if (chevarJami > 0) lines.push(row("Chevar haqi", `${totalJami.toFixed(2)} m × ${chevarHaqi.toLocaleString("uz-UZ")} so'm/m`, chevarJami));
+      if (ornatishJami > 0) lines.push(row("O'rnatish", `${ornatishLabel} — ${jmDona} ta × ${fmtNum(ornatishNarx)} so'm`, ornatishJami));
+      if (chevarJami > 0) lines.push(row("Chevar haqi", `${totalJami.toFixed(2)} m × ${fmtNum(chevarHaqi)} so'm/m`, chevarJami));
       if (karniizTotal > 0) lines.push(row("Karniiz va Baget", `${karniizList.length} dona`, karniizTotal));
       lines.push(row("UMUMIY NARX (JAMI)", "", grandTotal));
       lines.push("");

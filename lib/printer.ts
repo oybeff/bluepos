@@ -177,38 +177,104 @@ const BARCODE_PAPER: Record<BarcodePaperSize, { pageW: string; labelW: number; c
   "a4":   { pageW: "210mm", labelW: 130, cols: 4, fontSize: 11, barcodeH: 35 },
 };
 
+const C128: number[][] = [
+  [2,1,2,2,2,2],[2,2,2,1,2,2],[2,2,2,2,2,1],[1,2,1,2,2,3],[1,2,1,3,2,2],
+  [1,3,1,2,2,2],[1,2,2,2,1,3],[1,2,2,3,1,2],[1,3,2,2,1,2],[2,2,1,2,1,3],
+  [2,2,1,3,1,2],[2,3,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,2,3,1],
+  [1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],
+  [2,2,1,2,3,1],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],
+  [3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],
+  [2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],
+  [1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],
+  [2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],
+  [1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],
+  [2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],
+  [3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],
+  [3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],
+  [1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],
+  [1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],
+  [2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],
+  [1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],
+  [1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],
+  [2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],
+  [1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],
+  [1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],
+  [2,1,1,2,3,2],[2,3,3,1,1,1,2],
+];
+
+function genBarcodeSvg(value: string, h = 50, mw = 2): string {
+  if (!value) return '';
+  const chars = value.split('').map(c => { const v = c.charCodeAt(0) - 32; return v >= 0 && v <= 94 ? v : -1; }).filter(c => c >= 0);
+  const codes = [104, ...chars];
+  const chk = codes.reduce((s, v, i) => s + (i === 0 ? v : v * i), 0) % 103;
+  codes.push(chk, 106);
+  const mods: boolean[] = [];
+  for (const code of codes) { const p = C128[code]; if (!p) continue; for (let j = 0; j < p.length; j++) for (let k = 0; k < p[j]; k++) mods.push(j % 2 === 0); }
+  const w = mods.length * mw + 20;
+  const rects = mods.map((f, i) => f ? `<rect x="${10 + i * mw}" y="2" width="${mw}" height="${h}" fill="#000"/>` : '').join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h + 4}" viewBox="0 0 ${w} ${h + 4}" style="max-width:100%;height:auto;"><rect width="${w}" height="${h + 4}" fill="white"/>${rects}</svg>`;
+}
+
 function buildBarcodeLabelHtml(
   product: { name: string; barcode: string | null; pricePerUnit: number; unit: string },
   count: number,
   paperSize: BarcodePaperSize = "58mm",
 ): string {
-  const cfg = BARCODE_PAPER[paperSize];
-  const labelW = cfg.labelW;
-  const singleLabel = `
-    <div style="width:${labelW}px; border:1px solid #ddd; padding:6px 8px; text-align:center;
+  const isThermal = paperSize === "58mm" || paperSize === "80mm";
+
+  if (isThermal) {
+    const pw = paperSize === "58mm" ? 60 : 80;
+    const ph = 50;
+    const fontSize = 10;
+    const barcodeH = 30;
+    const barcodeSvg = product.barcode ? genBarcodeSvg(product.barcode, barcodeH, 1) : '';
+    const labels = Array(Math.max(1, Math.min(count, 50))).fill(null).map(() => `
+      <div class="lbl">
+        <div style="font-size:${fontSize}px; font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          ${product.name || ""}
+        </div>
+        <div style="font-size:${fontSize - 1}px; color:#333;">
+          ${fmtN(product.pricePerUnit || 0)} so'm / ${product.unit || ""}
+        </div>
+        ${barcodeSvg ? `<div style="margin:2px 0;">${barcodeSvg}</div>` : ''}
+        ${product.barcode ? `<div style="font-size:${fontSize - 2}px; letter-spacing:1px; color:#333;">${product.barcode}</div>` : ''}
+      </div>
+    `).join("");
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  @page { size: ${pw}mm ${ph}mm; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: ${pw}mm; height: ${ph}mm; font-family: 'Courier New', monospace; }
+  .lbl { width: ${pw}mm; height: ${ph}mm; padding: 2mm; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; text-align: center;
+         page-break-after: always; overflow: hidden; }
+  .lbl:last-child { page-break-after: auto; }
+</style></head>
+<body>${labels}</body></html>`;
+  }
+
+  const barcodeSvg = product.barcode ? genBarcodeSvg(product.barcode, 35, 1) : '';
+  const label = `
+    <div style="width:130px; border:1px solid #ddd; padding:6px 8px; text-align:center;
                 font-family:'Courier New',monospace; display:inline-block; vertical-align:top; margin:4px;
                 page-break-inside:avoid;">
-      <div style="font-size:${cfg.fontSize}px; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:${labelW - 16}px;">
+      <div style="font-size:11px; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:114px;">
         ${product.name || ""}
       </div>
-      <div style="font-size:${cfg.fontSize - 1}px; color:#444; margin:2px 0;">
+      <div style="font-size:10px; color:#444; margin:2px 0;">
         ${fmtN(product.pricePerUnit || 0)} so'm / ${product.unit || ""}
       </div>
-      <div style="font-size:${cfg.fontSize - 2}px; letter-spacing:3px; font-family:monospace; background:#f5f5f5;
-                  padding:3px; border-radius:3px; margin-top:4px; color:#111;">
-        ${product.barcode || "—"}
-      </div>
-      <div style="background:repeating-linear-gradient(90deg, #000 0px, #000 2px, #fff 2px, #fff 4px);
-                  height:${cfg.barcodeH}px; margin-top:4px; border-radius:2px;"></div>
-      <div style="font-size:${cfg.fontSize - 3}px; letter-spacing:2px; margin-top:2px; color:#333;">
+      ${barcodeSvg ? `<div style="margin-top:4px;">${barcodeSvg}</div>` : ''}
+      <div style="font-size:8px; letter-spacing:2px; margin-top:2px; color:#333;">
         ${product.barcode || ""}
       </div>
     </div>
   `;
-  const labels = Array(Math.max(1, Math.min(count, 50))).fill(singleLabel).join("");
+  const labels = Array(Math.max(1, Math.min(count, 50))).fill(label).join("");
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
-  @page { size: ${cfg.pageW} auto; margin: 2mm; }
+  @page { size: 210mm auto; margin: 2mm; }
   body { margin: 0; padding: 4px; display: flex; flex-wrap: wrap; justify-content: center; }
 </style></head>
 <body>${labels}</body></html>`;

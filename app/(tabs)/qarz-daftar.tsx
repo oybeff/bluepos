@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Platform, Modal,
-  FlatList, Pressable,
+  FlatList, Pressable, KeyboardAvoidingView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -10,10 +10,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
 import DateInput, { buildDateISO } from "@/components/DateInput";
+import { fmtDate as fmtDateUz, fmtNum, fmtDateTime } from "../../lib/date-utils";
 
 const C = Colors.light;
 
 const DEBT_SMS_TEXT = "Hurmatli mijoz, sizda parda xaridi bo'yicha qarzdorlik mavjud.\nTo'lovni imkon qadar tezroq amalga oshirishingizni so'raymiz.\nDo'kon: AL AMIN PARDALAR UYI\nTel: +998911741424";
+
+interface QarzHistory {
+  id: number; userId: number | null; userName: string | null;
+  action: string; oldValue: string | null; newValue: string | null;
+  details: string | null; createdAt: string;
+}
 
 interface QarzDaftar {
   id: number; ism: string; telefon: string | null;
@@ -22,6 +29,8 @@ interface QarzDaftar {
   qolganSumma: number | null; izoh: string | null; createdAt: string;
   tolovlar: { id: number; summa: number; izoh: string | null; createdAt: string }[];
   tolanganJami: number;
+  lastAction?: { userName: string | null; action: string; details: string | null; createdAt: string };
+  history?: QarzHistory[];
 }
 
 interface Stats {
@@ -31,15 +40,25 @@ interface Stats {
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+  return fmtNum(Math.round(n)) + " so'm";
 }
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "short", year: "numeric" });
+  return fmtDateUz(d, { year: true });
 }
 function isOverdue(d: string | null | undefined, status: string) {
   if (!d || status !== "ochiq") return false;
   return new Date(d) < new Date();
+}
+
+function actionLabel(action: string): { text: string; icon: string; color: string } {
+  switch (action) {
+    case "created": return { text: "Yaratildi", icon: "plus-circle", color: "#4F46E5" };
+    case "payment": return { text: "To'lov", icon: "check-circle", color: "#059669" };
+    case "closed": return { text: "Yopildi", icon: "x-circle", color: "#059669" };
+    case "deleted": return { text: "O'chirildi", icon: "trash-2", color: "#DC2626" };
+    default: return { text: action, icon: "edit", color: "#6B7280" };
+  }
 }
 
 type Tab = "barchasi" | "olindi" | "berildi";
@@ -62,6 +81,8 @@ export default function QarzDaftarScreen() {
   const [dateYear, setDateYear] = useState("");
   const [tolovSumma, setTolovSumma] = useState("");
   const [tolovIzoh, setTolovIzoh] = useState("");
+  const [history, setHistory] = useState<QarzHistory[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const { data: qarzlar = [], isLoading } = useQuery<QarzDaftar[]>({
     queryKey: ["qarz-daftar"],
@@ -106,6 +127,21 @@ export default function QarzDaftarScreen() {
   });
 
   function resetForm() { setForm({ ism: "", telefon: "", tur: "olindi", narsa: "", summa: "", izoh: "" }); setDateDay(""); setDateMonth(""); setDateYear(""); }
+
+  async function loadHistory(id: number) {
+    setHistoryLoading(true);
+    try {
+      const data = await apiReq<QarzHistory[]>(`/qarz-daftar/${id}/history`);
+      setHistory(data);
+    } catch { setHistory([]); }
+    finally { setHistoryLoading(false); }
+  }
+
+  function openDetail(q: QarzDaftar) {
+    setSelected(q);
+    setShowModal("detail");
+    loadHistory(q.id);
+  }
 
   // SMS
   const smsEligible = useMemo(() => qarzlar.filter(q => q.telefon && (q.status === "ochiq" || q.status === "qisman")), [qarzlar]);
@@ -264,7 +300,7 @@ export default function QarzDaftarScreen() {
             return (
               <TouchableOpacity
                 style={[s.card, { backgroundColor: C.card, borderColor: overdue ? "#FECACA" : C.border }]}
-                onPress={() => { setSelected(q); setShowModal("detail"); }}
+                onPress={() => openDetail(q)}
                 activeOpacity={0.75}
               >
                 {overdue && (
@@ -304,6 +340,16 @@ export default function QarzDaftarScreen() {
                   </View>
                 </View>
 
+                {q.lastAction && (
+                  <View style={[s.lastActionRow, { borderTopColor: C.border }]}>
+                    <Feather name={actionLabel(q.lastAction.action).icon as any} size={11} color={C.textSecondary} />
+                    <Text style={[s.lastActionTxt, { color: C.textSecondary }]} numberOfLines={1}>
+                      {q.lastAction.userName || "—"}: {actionLabel(q.lastAction.action).text}
+                      {" · "}{fmtDateTime(q.lastAction.createdAt)}
+                    </Text>
+                  </View>
+                )}
+
                 {q.status === "ochiq" || q.status === "qisman" ? (
                   <View style={[s.cardFooter, { borderTopColor: C.border }]}>
                     <TouchableOpacity
@@ -340,6 +386,7 @@ export default function QarzDaftarScreen() {
 
       {/* ─── CREATE MODAL ─── */}
       <Modal visible={showModal === "create"} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={s.overlay}>
           <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
           <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
@@ -395,6 +442,7 @@ export default function QarzDaftarScreen() {
             </ScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ─── DETAIL MODAL ─── */}
@@ -457,11 +505,39 @@ export default function QarzDaftarScreen() {
                           <Text style={[s.tolovSumma, { color: "#059669" }]}>{fmt(t.summa)}</Text>
                           {t.izoh && <Text style={[s.tolovIzoh, { color: "#6EE7B7" }]}>{t.izoh}</Text>}
                         </View>
-                        <Text style={[s.tolovDate, { color: C.textSecondary }]}>{fmtDate(t.createdAt)}</Text>
+                        <Text style={[s.tolovDate, { color: C.textSecondary }]}>{fmtDateTime(t.createdAt)}</Text>
                       </View>
                     ))}
                   </View>
                 )}
+                {/* Tarix (History) */}
+                <View style={{ gap: 6 }}>
+                  <Text style={[s.sectionTitle, { color: C.text }]}>Tarix</Text>
+                  {historyLoading ? (
+                    <ActivityIndicator color={C.primary} style={{ marginVertical: 10 }} />
+                  ) : history.length === 0 ? (
+                    <Text style={{ fontSize: 12, color: C.textSecondary, fontFamily: "Inter_400Regular", paddingVertical: 8 }}>Tarix mavjud emas</Text>
+                  ) : (
+                    history.map((h, idx) => {
+                      const al = actionLabel(h.action);
+                      return (
+                        <View key={h.id} style={[s.historyRow, { borderLeftColor: al.color }]}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Feather name={al.icon as any} size={13} color={al.color} />
+                            <Text style={[s.historyAction, { color: al.color }]}>{al.text}</Text>
+                            <Text style={[s.historyUser, { color: C.textSecondary }]}>{h.userName || "—"}</Text>
+                          </View>
+                          {h.details && <Text style={[s.historyDetails, { color: C.text }]}>{h.details}</Text>}
+                          {h.newValue && h.action === "payment" && (
+                            <Text style={[s.historyAmount, { color: "#059669" }]}>+{fmtNum(Math.round(Number(h.newValue)))} so'm</Text>
+                          )}
+                          <Text style={[s.historyDate, { color: C.textSecondary }]}>{fmtDateTime(h.createdAt)}</Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+
                 {/* Actions */}
                 {(selected.status === "ochiq" || selected.status === "qisman") && (
                   <View style={{ gap: 10 }}>
@@ -500,6 +576,7 @@ export default function QarzDaftarScreen() {
 
       {/* ─── TO'LOV MODAL ─── */}
       <Modal visible={showModal === "tolov"} transparent animationType="slide" onRequestClose={() => setShowModal(null)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={s.overlay}>
           <Pressable style={{ flex: 1 }} onPress={() => setShowModal(null)} />
           <View style={[s.sheet, { backgroundColor: C.card, paddingBottom: insets.bottom + 20 }]}>
@@ -507,7 +584,7 @@ export default function QarzDaftarScreen() {
               <Text style={[s.sheetTitle, { color: C.text }]}>To'lov qo'shish</Text>
               <TouchableOpacity onPress={() => setShowModal(null)}><Feather name="x" size={20} color={C.textSecondary} /></TouchableOpacity>
             </View>
-            <View style={{ padding: 16, gap: 14 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 14 }}>
               {selected?.qolganSumma && selected.qolganSumma > 0 && (
                 <View style={[s.detailRowInline, { backgroundColor: "#FEF3C7" }]}>
                   <Feather name="info" size={14} color="#D97706" />
@@ -523,9 +600,10 @@ export default function QarzDaftarScreen() {
               >
                 {tolovMut.isPending ? <ActivityIndicator color="#fff" /> : <Text style={s.saveBtnTxt}>Saqlash</Text>}
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ─── SMS MODAL ─── */}
@@ -701,4 +779,12 @@ const s = StyleSheet.create({
   selectAllTxt: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   smsItem: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   smsItemName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  lastActionRow: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderTopWidth: 1 },
+  lastActionTxt: { fontSize: 10, fontFamily: "Inter_400Regular", flex: 1 },
+  historyRow: { borderLeftWidth: 3, paddingLeft: 10, paddingVertical: 6, gap: 2 },
+  historyAction: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  historyUser: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  historyDetails: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  historyAmount: { fontSize: 12, fontFamily: "Inter_700Bold" },
+  historyDate: { fontSize: 10, fontFamily: "Inter_400Regular" },
 });

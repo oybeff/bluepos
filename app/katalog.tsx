@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
@@ -28,7 +29,7 @@ interface Product {
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {

@@ -11,9 +11,10 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
 import { printReceipt, ReceiptPaperSize } from "@/lib/printer";
+import { fmtNum } from "@/lib/date-utils";
 
 const C = Colors.light;
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+const fmt = (n: number) => fmtNum(Math.round(n || 0)) + " so'm";
 
 interface Product {
   id: number;

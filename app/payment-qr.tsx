@@ -8,11 +8,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import Colors from "@/constants/colors";
+import { fmtDateNum, fmtNum } from "../lib/date-utils";
 
 const C = Colors.light;
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 export default function PaymentQRScreen() {
@@ -151,7 +152,7 @@ export default function PaymentQRScreen() {
           {phone ? <DetailRow label="Telefon" value={phone} /> : null}
           <DetailRow label="Bitim raqami" value={`#${dealId}`} />
           <DetailRow label="Summa" value={fmt(amount)} bold color="#059669" />
-          <DetailRow label="Sana" value={new Date().toLocaleDateString("uz-UZ")} />
+          <DetailRow label="Sana" value={fmtDateNum(new Date())} />
         </View>
 
         {/* Instructions */}

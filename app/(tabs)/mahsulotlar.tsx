@@ -15,7 +15,8 @@ import { apiReq } from "@/lib/api";
 import { printBarcodeLabel, BarcodePaperSize } from "@/lib/printer";
 
 const C = Colors.light;
-const fmt = (n: number) => new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+import { fmtNum } from "@/lib/date-utils";
+const fmt = (n: number) => fmtNum(Math.round(n)) + " so'm";
 
 interface Category {
   id: number;
@@ -916,7 +917,7 @@ export default function MahsulotlarScreen() {
         <View style={pSt.stats}>
           <View style={[pSt.stat, { backgroundColor: isOut ? "#FEF2F2" : isLow ? "#FFFBEB" : "#ECFDF5" }]}>
             <Text style={[pSt.statVal, { color: isOut ? "#EF4444" : isLow ? "#F59E0B" : "#10B981" }]}>
-              {new Intl.NumberFormat("uz-UZ").format(p.stock)}
+              {fmtNum(p.stock)}
             </Text>
             <Text style={[pSt.statLbl, { color: isOut ? "#EF4444" : isLow ? "#F59E0B" : "#10B981" }]}>
               {isOut ? "Tugagan" : isLow ? "Kam (" + unitLabel + ")" : unitLabel}
@@ -1147,7 +1148,7 @@ export default function MahsulotlarScreen() {
               borderColor: catFilter === cat.key ? C.primary : C.border,
             }]}>
             <Text style={{ fontSize: 16 }}>{cat.emoji}</Text>
-            <Text style={[mainSt.catName, { color: catFilter === cat.key ? "#fff" : C.text }]}>{cat.name}</Text>
+            <Text style={[mainSt.catName, { color: catFilter === cat.key ? "#fff" : C.text }]}>{cat.name || cat.key}</Text>
             {(catCount[cat.key] || 0) > 0 && (
               <View style={[mainSt.catCount, { backgroundColor: catFilter === cat.key ? "rgba(255,255,255,0.25)" : C.surface }]}>
                 <Text style={[mainSt.catCountText, { color: catFilter === cat.key ? "#fff" : C.textSecondary }]}>

@@ -78,7 +78,8 @@ function RootLayoutNav() {
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="register-pending" />
-        <Stack.Screen name="deal/[id]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="deal/[id]/index" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="deal/[id]/edit" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="new-deal" options={{ animation: "slide_from_bottom", presentation: "modal" }} />
         <Stack.Screen name="scanner" options={{ animation: "slide_from_bottom", presentation: "modal" }} />
         <Stack.Screen name="payment-qr" options={{ animation: "slide_from_bottom", presentation: "modal" }} />

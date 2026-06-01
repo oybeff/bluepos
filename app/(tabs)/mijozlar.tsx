@@ -9,6 +9,7 @@ import { Feather } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtDate as fmtDateUtil, fmtNum } from "@/lib/date-utils";
 import { router } from "expo-router";
 
 const C = Colors.light;
@@ -26,11 +27,11 @@ interface ClientDeal {
 
 function fmt(n: number | null | undefined) {
   if (!n) return "—";
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n)) + " so'm";
+  return fmtNum(Math.round(n)) + " so'm";
 }
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("uz-UZ", { day: "2-digit", month: "short", year: "numeric" }); }
+  try { return fmtDateUtil(d, { year: true }); }
   catch { return d; }
 }
 function daysLeft(d: string | null): number | null {
@@ -182,135 +183,14 @@ export default function MijozlarScreen() {
 
   // ─── DETAIL VIEW ──────────────────────────────────────────────────────────
   if (view === "detail" && selected) {
-    const cDeals = customerDetail?.deals ?? [];
-    const totalDebt = cDeals.filter(d => d.status === "active").reduce((s, d) => s + (d.qarzSumma || 0), 0);
-
-    return (
-      <View style={[st.root, { backgroundColor: C.background }]}>
-        <View style={[st.header, { paddingTop: topPad, borderBottomColor: C.border }]}>
-          <TouchableOpacity onPress={goBack} style={st.backBtn}>
-            <Feather name="arrow-left" size={22} color={C.text} />
-          </TouchableOpacity>
-          <Text style={[st.title, { color: C.text }]} numberOfLines={1}>{selected.fullName}</Text>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <TouchableOpacity onPress={() => openEdit(selected)} style={[st.iconBtn, { backgroundColor: C.primary + "18" }]}>
-              <Feather name="edit-2" size={16} color={C.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => Alert.alert("O'chirish", "Mijozni o'chirmoqchimisiz?", [
-              { text: "Bekor" }, { text: "Ha", style: "destructive", onPress: () => deleteMut.mutate(selected.id) }
-            ])} style={[st.iconBtn, { backgroundColor: "#FEE2E2" }]}>
-              <Feather name="trash-2" size={16} color="#DC2626" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
-          {/* Info card */}
-          <View style={[st.card, { backgroundColor: C.card, borderColor: C.border }]}>
-            <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-              <View style={[st.avatar, { backgroundColor: C.primary + "20" }]}>
-                <Text style={{ fontSize: 22, fontFamily: "Inter_700Bold", color: C.primary }}>
-                  {selected.fullName[0]?.toUpperCase()}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[st.customerName, { color: C.text }]}>{selected.fullName}</Text>
-                <Text style={[st.customerPhone, { color: C.primary }]}>{selected.phone}</Text>
-                {selected.address ? <Text style={[st.customerSub, { color: C.textSecondary }]}>{selected.address}</Text> : null}
-              </View>
-            </View>
-            {totalDebt > 0 && (
-              <View style={[st.debtBadge, { backgroundColor: "#FEE2E2", borderColor: "#FECACA" }]}>
-                <Feather name="alert-circle" size={14} color="#DC2626" />
-                <Text style={{ color: "#DC2626", fontSize: 13, fontFamily: "Inter_600SemiBold" }}>
-                  Joriy qarz: {fmt(totalDebt)}
-                </Text>
-              </View>
-            )}
-            {selected.notes ? (
-              <View style={[st.noteBox, { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }]}>
-                <Feather name="file-text" size={13} color="#D97706" />
-                <Text style={{ color: "#92400E", fontSize: 12, fontFamily: "Inter_400Regular", flex: 1 }}>{selected.notes}</Text>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Deals */}
-          <Text style={[st.sectionLabel, { color: C.textSecondary }]}>Bitimlar tarixi</Text>
-          {cDeals.length === 0 ? (
-            <View style={[st.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Feather name="shopping-bag" size={28} color={C.textSecondary} />
-              <Text style={{ color: C.textSecondary, fontFamily: "Inter_400Regular" }}>Hali bitim yo'q</Text>
-            </View>
-          ) : cDeals.map(d => {
-            const days = daysLeft(d.qaytarishMuddati);
-            const isOverdue = days !== null && days < 0;
-            const isSoon = days !== null && days >= 0 && days <= 3;
-            return (
-              <View key={d.id} style={[st.dealCard, { backgroundColor: C.card, borderColor: isOverdue ? "#FCA5A5" : isSoon ? "#FDE68A" : C.border }]}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={[st.dealId, { color: C.textSecondary }]}>#{d.id} · {fmtDate(d.createdAt)}</Text>
-                  <View style={[st.statusBadge, { backgroundColor: d.status === "paid" ? "#D1FAE5" : d.status === "active" ? "#EEF2FF" : "#F3F4F6" }]}>
-                    <Text style={{ fontSize: 10, fontFamily: "Inter_600SemiBold", color: d.status === "paid" ? "#059669" : d.status === "active" ? C.primary : C.textSecondary }}>
-                      {d.status === "paid" ? "To'langan" : d.status === "active" ? "Faol" : "Bekor"}
-                    </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
-                  <Text style={[{ color: C.text, fontFamily: "Inter_600SemiBold", fontSize: 14 }]}>{fmt(d.totalNarx)}</Text>
-                  {(d.qarzSumma ?? 0) > 0 && (
-                    <Text style={{ color: "#DC2626", fontFamily: "Inter_600SemiBold", fontSize: 13 }}>Qarz: {fmt(d.qarzSumma)}</Text>
-                  )}
-                </View>
-                {d.qaytarishMuddati && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
-                    <Feather name="calendar" size={12} color={isOverdue ? "#DC2626" : isSoon ? "#D97706" : C.textSecondary} />
-                    <Text style={{ fontSize: 12, color: isOverdue ? "#DC2626" : isSoon ? "#D97706" : C.textSecondary, fontFamily: "Inter_500Medium" }}>
-                      {fmtDate(d.qaytarishMuddati)}
-                      {days !== null && ` (${isOverdue ? Math.abs(days) + " kun o'tdi" : days === 0 ? "Bugun!" : days + " kun qoldi"})`}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
-
-        {/* Edit modal */}
-        <Modal visible={modal === "edit"} animationType="slide" transparent>
-          <View style={st.overlay}>
-            <View style={[st.modalBox, { backgroundColor: C.card }]}>
-              <Text style={[st.modalTitle, { color: C.text }]}>Mijozni tahrirlash</Text>
-              {(["fullName", "phone", "address", "notes"] as const).map(f => (
-                <View key={f} style={{ gap: 4 }}>
-                  <Text style={[st.fieldLabel, { color: C.textSecondary }]}>
-                    {f === "fullName" ? "To'liq ism" : f === "phone" ? "Telefon" : f === "address" ? "Manzil" : "Izoh"}
-                  </Text>
-                  <TextInput
-                    style={[st.input, { color: C.text, borderColor: C.border }]}
-                    value={form[f]} onChangeText={v => setForm(p => ({ ...p, [f]: v }))}
-                    keyboardType={f === "phone" ? "phone-pad" : "default"}
-                    multiline={f === "notes"} />
-                </View>
-              ))}
-              <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-                <TouchableOpacity onPress={() => setModal(null)} style={[st.btn, { backgroundColor: C.border, flex: 1 }]}>
-                  <Text style={{ color: C.text, fontFamily: "Inter_600SemiBold" }}>Bekor</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => editMut.mutate()} disabled={editMut.isPending}
-                  style={[st.btn, { backgroundColor: C.primary, flex: 2 }]}>
-                  {editMut.isPending ? <ActivityIndicator color="#fff" size="small" /> :
-                    <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>Saqlash</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      </View>
-    );
+    return <DetailView selected={selected} topPad={topPad} insets={insets}
+      goBack={goBack} openEdit={openEdit} deleteMut={deleteMut}
+      customerDetail={customerDetail} modal={modal} setModal={setModal}
+      form={form} setForm={setForm} editMut={editMut} qc={qc} />;
   }
 
   // ─── LIST VIEW ─────────────────────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return (
     <View style={[st.root, { backgroundColor: C.background }]}>
       <View style={[st.header, { paddingTop: topPad, borderBottomColor: C.border }]}>
@@ -490,6 +370,236 @@ export default function MijozlarScreen() {
                     <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>Yuborish</Text>
                   </>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+// ─── Detail View Component ──────────────────────────────────────────────────
+interface Tag { id: number; name: string; color: string }
+interface Note { id: number; content: string; created_at: string }
+
+function DetailView({ selected, topPad, insets, goBack, openEdit, deleteMut, customerDetail, modal, setModal, form, setForm, editMut, qc }: any) {
+  const cDeals: ClientDeal[] = customerDetail?.deals ?? [];
+  const totalDebt = cDeals.filter((d: ClientDeal) => d.status === "active").reduce((s: number, d: ClientDeal) => s + (d.qarzSumma || 0), 0);
+  const custId = selected.id;
+
+  const { data: tags = [], refetch: refetchTags } = useQuery<Tag[]>({
+    queryKey: ["customer-tags", custId],
+    queryFn: () => apiReq<Tag[]>(`/customers/${custId}/tags`),
+  });
+  const { data: notes = [], refetch: refetchNotes } = useQuery<Note[]>({
+    queryKey: ["customer-notes", custId],
+    queryFn: () => apiReq<Note[]>(`/customers/${custId}/notes`),
+  });
+
+  const [newTag, setNewTag] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [tagSaving, setTagSaving] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
+
+  async function addTag() {
+    if (!newTag.trim() || tagSaving) return;
+    setTagSaving(true);
+    try {
+      await apiReq(`/customers/${custId}/tags`, { method: "POST", body: JSON.stringify({ name: newTag.trim() }) });
+      setNewTag(""); refetchTags();
+    } catch { Alert.alert("Xato", "Teg qo'shib bo'lmadi"); }
+    setTagSaving(false);
+  }
+  async function removeTag(tagId: number) {
+    try {
+      await apiReq(`/customers/${custId}/tags/${tagId}`, { method: "DELETE" });
+      refetchTags();
+    } catch {}
+  }
+  async function addNote() {
+    if (!newNote.trim() || noteSaving) return;
+    setNoteSaving(true);
+    try {
+      await apiReq(`/customers/${custId}/notes`, { method: "POST", body: JSON.stringify({ content: newNote.trim() }) });
+      setNewNote(""); refetchNotes();
+    } catch { Alert.alert("Xato", "Eslatma qo'shib bo'lmadi"); }
+    setNoteSaving(false);
+  }
+
+  const TAG_COLORS = ["#6366f1", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#3B82F6", "#EF4444"];
+
+  return (
+    <View style={[st.root, { backgroundColor: C.background }]}>
+      <View style={[st.header, { paddingTop: topPad, borderBottomColor: C.border }]}>
+        <TouchableOpacity onPress={goBack} style={st.backBtn}>
+          <Feather name="arrow-left" size={22} color={C.text} />
+        </TouchableOpacity>
+        <Text style={[st.title, { color: C.text }]} numberOfLines={1}>{selected.fullName}</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TouchableOpacity onPress={() => openEdit(selected)} style={[st.iconBtn, { backgroundColor: C.primary + "18" }]}>
+            <Feather name="edit-2" size={16} color={C.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => Alert.alert("O'chirish", "Mijozni o'chirmoqchimisiz?", [
+            { text: "Bekor" }, { text: "Ha", style: "destructive", onPress: () => deleteMut.mutate(selected.id) }
+          ])} style={[st.iconBtn, { backgroundColor: "#FEE2E2" }]}>
+            <Feather name="trash-2" size={16} color="#DC2626" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 100 }}>
+        {/* Info card */}
+        <View style={[st.card, { backgroundColor: C.card, borderColor: C.border }]}>
+          <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+            <View style={[st.avatar, { backgroundColor: C.primary + "20" }]}>
+              <Text style={{ fontSize: 22, fontFamily: "Inter_700Bold", color: C.primary }}>
+                {selected.fullName[0]?.toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.customerName, { color: C.text }]}>{selected.fullName}</Text>
+              <Text style={[st.customerPhone, { color: C.primary }]}>{selected.phone}</Text>
+              {selected.address ? <Text style={[st.customerSub, { color: C.textSecondary }]}>{selected.address}</Text> : null}
+            </View>
+          </View>
+          {totalDebt > 0 && (
+            <View style={[st.debtBadge, { backgroundColor: "#FEE2E2", borderColor: "#FECACA" }]}>
+              <Feather name="alert-circle" size={14} color="#DC2626" />
+              <Text style={{ color: "#DC2626", fontSize: 13, fontFamily: "Inter_600SemiBold" }}>
+                Joriy qarz: {fmt(totalDebt)}
+              </Text>
+            </View>
+          )}
+          {selected.notes ? (
+            <View style={[st.noteBox, { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" }]}>
+              <Feather name="file-text" size={13} color="#D97706" />
+              <Text style={{ color: "#92400E", fontSize: 12, fontFamily: "Inter_400Regular", flex: 1 }}>{selected.notes}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Tags */}
+        <View style={[st.card, { backgroundColor: C.card, borderColor: C.border }]}>
+          <Text style={[st.sectionLabel, { color: C.textSecondary, marginBottom: 4 }]}>
+            <Feather name="tag" size={11} color={C.textSecondary} /> Teglar
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {tags.map((t: Tag) => (
+              <View key={t.id} style={{ flexDirection: "row", alignItems: "center", backgroundColor: (t.color || "#6366f1") + "20", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, gap: 4 }}>
+                <Text style={{ fontSize: 12, fontFamily: "Inter_600SemiBold", color: t.color || "#6366f1" }}>{t.name}</Text>
+                <TouchableOpacity onPress={() => removeTag(t.id)} hitSlop={8}>
+                  <Feather name="x" size={12} color={t.color || "#6366f1"} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+            <TextInput
+              style={[st.input, { color: C.text, borderColor: C.border, flex: 1, paddingVertical: 7, fontSize: 13 }]}
+              value={newTag} onChangeText={setNewTag}
+              placeholder="Yangi teg..." placeholderTextColor={C.textSecondary}
+              onSubmitEditing={addTag} />
+            <TouchableOpacity onPress={addTag} disabled={!newTag.trim() || tagSaving}
+              style={[st.iconBtn, { backgroundColor: C.primary, opacity: !newTag.trim() ? 0.4 : 1 }]}>
+              <Feather name="plus" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Notes */}
+        <View style={[st.card, { backgroundColor: C.card, borderColor: C.border }]}>
+          <Text style={[st.sectionLabel, { color: C.textSecondary, marginBottom: 4 }]}>
+            <Feather name="message-square" size={11} color={C.textSecondary} /> Eslatmalar
+          </Text>
+          {notes.length === 0 && <Text style={{ color: C.textSecondary, fontSize: 12, fontFamily: "Inter_400Regular" }}>Hali eslatma yo'q</Text>}
+          {notes.map((n: Note) => (
+            <View key={n.id} style={{ backgroundColor: C.surface, borderRadius: 8, padding: 10, gap: 2 }}>
+              <Text style={{ color: C.text, fontSize: 13, fontFamily: "Inter_400Regular" }}>{n.content}</Text>
+              <Text style={{ color: C.textSecondary, fontSize: 10, fontFamily: "Inter_400Regular" }}>
+                {fmtDate(n.created_at)}
+              </Text>
+            </View>
+          ))}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+            <TextInput
+              style={[st.input, { color: C.text, borderColor: C.border, flex: 1, paddingVertical: 7, fontSize: 13 }]}
+              value={newNote} onChangeText={setNewNote}
+              placeholder="Yangi eslatma..." placeholderTextColor={C.textSecondary}
+              onSubmitEditing={addNote} />
+            <TouchableOpacity onPress={addNote} disabled={!newNote.trim() || noteSaving}
+              style={[st.iconBtn, { backgroundColor: C.primary, opacity: !newNote.trim() ? 0.4 : 1 }]}>
+              {noteSaving ? <ActivityIndicator color="#fff" size="small" /> : <Feather name="send" size={14} color="#fff" />}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Deals */}
+        <Text style={[st.sectionLabel, { color: C.textSecondary }]}>Bitimlar tarixi</Text>
+        {cDeals.length === 0 ? (
+          <View style={[st.emptyCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Feather name="shopping-bag" size={28} color={C.textSecondary} />
+            <Text style={{ color: C.textSecondary, fontFamily: "Inter_400Regular" }}>Hali bitim yo'q</Text>
+          </View>
+        ) : cDeals.map((d: ClientDeal) => {
+          const days = daysLeft(d.qaytarishMuddati);
+          const isOverdue = days !== null && days < 0;
+          const isSoon = days !== null && days >= 0 && days <= 3;
+          return (
+            <View key={d.id} style={[st.dealCard, { backgroundColor: C.card, borderColor: isOverdue ? "#FCA5A5" : isSoon ? "#FDE68A" : C.border }]}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={[st.dealId, { color: C.textSecondary }]}>#{d.id} · {fmtDate(d.createdAt)}</Text>
+                <View style={[st.statusBadge, { backgroundColor: d.status === "paid" ? "#D1FAE5" : d.status === "active" ? "#EEF2FF" : "#F3F4F6" }]}>
+                  <Text style={{ fontSize: 10, fontFamily: "Inter_600SemiBold", color: d.status === "paid" ? "#059669" : d.status === "active" ? C.primary : C.textSecondary }}>
+                    {d.status === "paid" ? "To'langan" : d.status === "active" ? "Faol" : "Bekor"}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+                <Text style={[{ color: C.text, fontFamily: "Inter_600SemiBold", fontSize: 14 }]}>{fmt(d.totalNarx)}</Text>
+                {(d.qarzSumma ?? 0) > 0 && (
+                  <Text style={{ color: "#DC2626", fontFamily: "Inter_600SemiBold", fontSize: 13 }}>Qarz: {fmt(d.qarzSumma)}</Text>
+                )}
+              </View>
+              {d.qaytarishMuddati && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                  <Feather name="calendar" size={12} color={isOverdue ? "#DC2626" : isSoon ? "#D97706" : C.textSecondary} />
+                  <Text style={{ fontSize: 12, color: isOverdue ? "#DC2626" : isSoon ? "#D97706" : C.textSecondary, fontFamily: "Inter_500Medium" }}>
+                    {fmtDate(d.qaytarishMuddati)}
+                    {days !== null && ` (${isOverdue ? Math.abs(days) + " kun o'tdi" : days === 0 ? "Bugun!" : days + " kun qoldi"})`}
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      {/* Edit modal */}
+      <Modal visible={modal === "edit"} animationType="slide" transparent>
+        <View style={st.overlay}>
+          <View style={[st.modalBox, { backgroundColor: C.card }]}>
+            <Text style={[st.modalTitle, { color: C.text }]}>Mijozni tahrirlash</Text>
+            {(["fullName", "phone", "address", "notes"] as const).map(f => (
+              <View key={f} style={{ gap: 4 }}>
+                <Text style={[st.fieldLabel, { color: C.textSecondary }]}>
+                  {f === "fullName" ? "To'liq ism" : f === "phone" ? "Telefon" : f === "address" ? "Manzil" : "Izoh"}
+                </Text>
+                <TextInput
+                  style={[st.input, { color: C.text, borderColor: C.border }]}
+                  value={form[f]} onChangeText={(v: string) => setForm((p: any) => ({ ...p, [f]: v }))}
+                  keyboardType={f === "phone" ? "phone-pad" : "default"}
+                  multiline={f === "notes"} />
+              </View>
+            ))}
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+              <TouchableOpacity onPress={() => setModal(null)} style={[st.btn, { backgroundColor: C.border, flex: 1 }]}>
+                <Text style={{ color: C.text, fontFamily: "Inter_600SemiBold" }}>Bekor</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => editMut.mutate()} disabled={editMut.isPending}
+                style={[st.btn, { backgroundColor: C.primary, flex: 2 }]}>
+                {editMut.isPending ? <ActivityIndicator color="#fff" size="small" /> :
+                  <Text style={{ color: "#fff", fontFamily: "Inter_700Bold" }}>Saqlash</Text>}
               </TouchableOpacity>
             </View>
           </View>

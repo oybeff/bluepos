@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Platform } from "react-native";
 import Colors from "@/constants/colors";
 import { apiReq } from "@/lib/api";
+import { fmtNum } from "@/lib/date-utils";
 
 const C = Colors.light;
 
@@ -27,7 +28,7 @@ interface Product {
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat("uz-UZ").format(Math.round(n || 0)) + " so'm";
+  return fmtNum(Math.round(n || 0)) + " so'm";
 }
 
 function urgencyLevel(p: Product): "critical" | "warning" | "ok" {

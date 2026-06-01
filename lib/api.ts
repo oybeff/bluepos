@@ -75,6 +75,94 @@ export async function apiReq<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+export async function apiUpload<T = unknown>(
+  path: string,
+  fileUri: string,
+  fieldName = "file",
+): Promise<T> {
+  const token = await AsyncStorage.getItem("auth_token");
+  const base = getApiUrl();
+
+  const ext = fileUri.split(".").pop()?.toLowerCase() || "jpg";
+  const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+
+  const fd = new FormData();
+  fd.append(fieldName, { uri: fileUri, name: `photo.${ext}`, type: mime } as any);
+
+  const res = await fetch(`${base}/api${path}`, {
+    method: "POST",
+    body: fd,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+    throw new ApiError(res.status, (body as any)?.error ?? `HTTP ${res.status}`, body);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+// ─── ERP API (port 3002) ─────────────────────────────────────────────────────
+
+function getErpApiUrl(): string {
+  const base = getApiUrl();
+  return base.replace(/:3001\b/, ":3002");
+}
+
+export async function erpApiReq<T = unknown>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = await AsyncStorage.getItem("auth_token");
+  const base = getErpApiUrl();
+
+  const res = await fetch(`${base}/api${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    if (res.status === 401 && _onUnauthorized) _onUnauthorized();
+    throw new ApiError(res.status, (body as any)?.error ?? `HTTP ${res.status}`, body);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+// ─── Instagram Leads types ───────────────────────────────────────────────────
+
+export interface InstagramLead {
+  id: number;
+  ism: string;
+  telefon: string;
+  manzil: string | null;
+  xizmat_turi: string | null;
+  izoh: string | null;
+  status: "yangi" | "bog'lanildi" | "deal" | "bekor";
+  assigned_to: number | null;
+  assigned_name: string | null;
+  created_at: string;
+}
+
+export interface LeadStats {
+  jami: number;
+  yangi: number;
+  boglanildi: number;
+  deal: number;
+  bekor: number;
+  bugun: number;
+  hafta: number;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
@@ -83,6 +171,7 @@ export interface AuthUser {
   fullName: string;
   role: string;
   branchId: number | null;
+  linkedWorkerId?: number | null;
 }
 
 export interface LoginResponse {
@@ -360,4 +449,64 @@ export function getTransactions(params?: {
   if (params?.limit) qs.set("limit", String(params.limit));
   const query = qs.toString() ? `?${qs.toString()}` : "";
   return apiReq<Transaction[]>(`/finance${query}`);
+}
+
+// ─── Attendance (Davomat) ────────────────────────────────────────────────────
+
+export interface ShopLocation {
+  id: number;
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  radiusMeters: number;
+}
+
+export interface AttendanceRecord {
+  id: number;
+  worker_id: number;
+  date: string;
+  status: string;
+  hours_worked: number | null;
+  clock_in: string | null;
+  clock_out: string | null;
+}
+
+export function getShopLocation(): Promise<ShopLocation> {
+  return apiReq<ShopLocation>("/attendance/shop-location");
+}
+
+export function getMyTodayAttendance(): Promise<{
+  record: AttendanceRecord | null;
+  linkedWorkerId: number | null;
+}> {
+  return apiReq("/attendance/my-today");
+}
+
+export function getMyAttendanceHistory(): Promise<{
+  history: AttendanceRecord[];
+  linkedWorkerId: number | null;
+}> {
+  return apiReq("/attendance/my-history");
+}
+
+export function clockAttendance(
+  action: "in" | "out",
+  coords?: { latitude: number; longitude: number }
+): Promise<{ success: boolean; action: string }> {
+  return apiReq("/attendance/clock", {
+    method: "POST",
+    body: JSON.stringify({ action, ...coords }),
+  });
+}
+
+export function updateShopLocation(data: {
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+}): Promise<ShopLocation> {
+  return apiReq<ShopLocation>("/attendance/shop-location", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
 }
